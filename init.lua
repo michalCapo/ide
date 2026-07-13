@@ -2474,7 +2474,8 @@ _G.nvim_keymap_search_groups = {
       { "<leader>cf", "Format buffer" },
       { "]d", "Next diagnostic" },
       { "[d", "Previous diagnostic" },
-      { "]e / ]-e / <C-e>", "Next error in file" },
+      { "]e / ]-e", "Next error in file" },
+      { "<C-e>", "Next error, then next diagnostic" },
       { "[e / [-e", "Previous error in file" },
       { "<leader>cl", "Line diagnostic" },
       { ":LspStatus", "Show active LSP clients" },
@@ -6074,13 +6075,21 @@ local function diagnostic_jump(count, severity)
   })
 end
 
+local function next_error_or_diagnostic()
+  local next_error = vim.diagnostic.get_next({
+    severity = vim.diagnostic.severity.ERROR,
+    wrap = false,
+  })
+  diagnostic_jump(1, next_error and vim.diagnostic.severity.ERROR or nil)
+end
+
 vim.keymap.set("n", "]d", function() diagnostic_jump(1) end, { desc = "Next diagnostic" })
 vim.keymap.set("n", "[d", function() diagnostic_jump(-1) end, { desc = "Previous diagnostic" })
 vim.keymap.set("n", "]e", function() diagnostic_jump(1, vim.diagnostic.severity.ERROR) end, { desc = "Next error in file" })
 vim.keymap.set("n", "[e", function() diagnostic_jump(-1, vim.diagnostic.severity.ERROR) end, { desc = "Previous error in file" })
 vim.keymap.set("n", "]-e", function() diagnostic_jump(1, vim.diagnostic.severity.ERROR) end, { desc = "Next error in file" })
 vim.keymap.set("n", "[-e", function() diagnostic_jump(-1, vim.diagnostic.severity.ERROR) end, { desc = "Previous error in file" })
-vim.keymap.set("n", "<C-e>", function() diagnostic_jump(1, vim.diagnostic.severity.ERROR) end, { desc = "Next error in file" })
+vim.keymap.set("n", "<C-e>", next_error_or_diagnostic, { desc = "Next error, then next diagnostic" })
 vim.keymap.set("n", "<leader>cl", function()
   open_diagnostic_float({ scope = "line" })
 end, { desc = "Line diagnostic" })
