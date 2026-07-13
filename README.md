@@ -46,22 +46,6 @@ make update  # refresh the cached Neovim download
 make clean   # remove generated files
 ```
 
-## Publish a release
-
-Publishing requires Linux, the build requirements above, and an authenticated
-[GitHub CLI](https://cli.github.com/):
-
-```sh
-make publish
-```
-
-Run it from a clean `main` branch that has been pushed to `origin`. It builds
-both supported architectures and publishes them directly to GitHub Releases.
-The first release is `v0.1.0`; later releases automatically increment the patch
-number (`v0.1.1`, `v0.1.2`, and so on). After the new release succeeds, older
-releases are deleted so only the latest remains. Their Git tags are retained for
-version history.
-
 ## Use as a regular config
 
 Clone the repository to Neovim's config directory and start Neovim normally:
