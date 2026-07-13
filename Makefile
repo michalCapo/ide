@@ -7,6 +7,8 @@ DIST_DIR := dist
 DOWNLOAD_DIR := .cache
 NAME := nvim
 OUTPUT := $(DIST_DIR)/$(NAME)
+LAZYDIFF_NAME := lazydiff
+LAZYDIFF_OUTPUT := $(DIST_DIR)/$(LAZYDIFF_NAME)
 NVIM_ARCHIVE := $(DOWNLOAD_DIR)/nvim-linux-$(ARCH)-$(NVIM_VERSION).tar.gz
 NVIM_URL := https://github.com/neovim/neovim/releases/download/$(NVIM_VERSION)/nvim-linux-$(ARCH).tar.gz
 PREFIX ?= $(HOME)/.local
@@ -21,7 +23,7 @@ all: help
 help:
 	@printf '%s\n' \
 	  'Available commands:' \
-	  '  make build    Build the portable executable in dist/' \
+	  '  make build    Build the portable nvim and lazydiff executables in dist/' \
 	  '  make update   Refresh the cached official Neovim download' \
 	  '  make install  Build and install it as ~/.local/bin/nvim' \
 	  '  make clean    Remove generated files; keep the Neovim download'
@@ -76,6 +78,9 @@ build: $(NVIM_ARCHIVE)
 	  rmdir "$$TMP_DIR" 2>/dev/null || true
 	fi
 	export NVIM_PORTABLE_INIT="$$APP_DIR/config/init.lua"
+	if [ "$${NVIM_PORTABLE_LAZYDIFF:-}" = 1 ]; then
+	  exec "$$APP_DIR/nvim/bin/nvim" -u NORC --cmd "set runtimepath^=$$APP_DIR/config" "$$@"
+	fi
 	exec "$$APP_DIR/nvim/bin/nvim" -u "$$NVIM_PORTABLE_INIT" "$$@"
 	LAUNCHER
 	sed -i "s/PAYLOAD_ID_VALUE/$$PAYLOAD_ID/" "$$STUB"
@@ -85,11 +90,27 @@ build: $(NVIM_ARCHIVE)
 	cat "$$STUB" "$$WORK/payload.tar.gz" >"$(OUTPUT)"
 	chmod 755 "$(OUTPUT)"
 	echo "Built $(OUTPUT) ($$(du -h "$(OUTPUT)" | cut -f1))"
+	cat >"$(LAZYDIFF_OUTPUT)" <<'LAZYDIFF'
+	#!/bin/sh
+	set -eu
+	SELF_DIR=$$(CDPATH= cd -- "$$(dirname -- "$$0")" && pwd)
+	NVIM_BIN=$${LAZYDIFF_NVIM:-$$SELF_DIR/$(INSTALL_NAME)}
+	if [ ! -x "$$NVIM_BIN" ]; then
+	  NVIM_BIN=$$(command -v "$(INSTALL_NAME)" || true)
+	fi
+	[ -n "$$NVIM_BIN" ] || { echo 'lazydiff requires $(INSTALL_NAME) on PATH' >&2; exit 127; }
+	export NVIM_PORTABLE_LAZYDIFF=1
+	exec "$$NVIM_BIN" -i NONE -c "lua require('views.lazydiff').launch({ focus_file = vim.env.LAZYDIFF_FILE })"
+	LAZYDIFF
+	chmod 755 "$(LAZYDIFF_OUTPUT)"
+	echo "Built $(LAZYDIFF_OUTPUT)"
 
 install: build
 	install -d "$(BINDIR)"
 	install -m 755 "$(OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
+	install -m 755 "$(LAZYDIFF_OUTPUT)" "$(BINDIR)/$(LAZYDIFF_NAME)"
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
+	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
 	$(MAKE) clean
 
 clean:
