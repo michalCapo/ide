@@ -17,8 +17,9 @@ INSTALL_NAME ?= nvim
 VSCODE_THEME_DIR := vscode-theme
 NVIM_DAP_DIR := nvim-dap
 PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
+RELEASE_DIR := $(DIST_DIR)/release
 
-.PHONY: all help build update install clean
+.PHONY: all help build update install release-assets publish clean
 
 all: help
 
@@ -28,6 +29,7 @@ help:
 	  '  make build    Build the portable nvim and lazydiff executables in dist/' \
 	  '  make update   Refresh the cached official Neovim download' \
 	  '  make install  Build and install it as ~/.local/bin/nvim' \
+	  '  make publish  Build and publish the next GitHub release' \
 	  '  make clean    Remove generated files; keep the Neovim download'
 
 $(NVIM_ARCHIVE):
@@ -124,6 +126,125 @@ install: build
 	rm -rf "$(PORTABLE_CACHE_DIR)"
 	echo "Cleared $(PORTABLE_CACHE_DIR)"
 	$(MAKE) clean
+
+release-assets:
+	set -eu
+	WORK=$$(mktemp -d)
+	trap 'rm -rf "$$WORK"' EXIT HUP INT TERM
+	for ARCH_VALUE in x86_64 arm64; do
+	  $(MAKE) build ARCH="$$ARCH_VALUE"
+	  tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NAME)" "$(LAZYDIFF_NAME)"
+	done
+	rm -rf "$(RELEASE_DIR)"
+	mkdir -p "$(RELEASE_DIR)"
+	mv "$$WORK"/nvim-linux-*.tar.gz "$(RELEASE_DIR)/"
+	cat >"$(RELEASE_DIR)/install.sh" <<'INSTALLER'
+	#!/bin/sh
+	set -eu
+
+	REPOSITORY=michalCapo/nvim
+	BASE_URL=$${NVIM_RELEASE_BASE_URL:-"https://github.com/$$REPOSITORY/releases/latest/download"}
+	BINDIR=$${HOME:+"$$HOME/.local/bin"}
+
+	fail() {
+	  echo "nvim installer: $$*" >&2
+	  exit 1
+	}
+
+	[ -n "$${BINDIR:-}" ] || fail 'HOME is not set'
+
+	for command_name in curl tar sha256sum mktemp; do
+	  command -v "$$command_name" >/dev/null 2>&1 || fail "required command not found: $$command_name"
+	done
+
+	[ "$$(uname -s)" = Linux ] || fail "unsupported operating system: $$(uname -s)"
+
+	case $$(uname -m) in
+	  x86_64|amd64) arch=x86_64 ;;
+	  aarch64|arm64) arch=arm64 ;;
+	  *) fail "unsupported Linux architecture: $$(uname -m)" ;;
+	esac
+
+	asset="nvim-linux-$$arch.tar.gz"
+	work=$$(mktemp -d)
+	trap 'rm -rf "$$work"' EXIT HUP INT TERM
+
+	echo "Downloading the latest nvim release for $$arch..."
+	curl -fL --retry 3 -o "$$work/$$asset" "$$BASE_URL/$$asset"
+	curl -fL --retry 3 -o "$$work/SHA256SUMS" "$$BASE_URL/SHA256SUMS"
+
+	awk -v asset="$$asset" '$$2 == asset { print; found = 1 } END { exit !found }' \
+	  "$$work/SHA256SUMS" > "$$work/$$asset.sha256" \
+	  || fail "checksum not found for $$asset"
+	(cd "$$work" && sha256sum -c "$$asset.sha256") || fail 'checksum verification failed'
+
+	mkdir -p "$$work/unpacked" "$$BINDIR"
+	tar -xzf "$$work/$$asset" -C "$$work/unpacked"
+	[ -f "$$work/unpacked/nvim" ] || fail 'release archive does not contain nvim'
+	[ -f "$$work/unpacked/lazydiff" ] || fail 'release archive does not contain lazydiff'
+	chmod 755 "$$work/unpacked/nvim" "$$work/unpacked/lazydiff"
+
+	stage="$$BINDIR/.nvim-install.$$$$"
+	mkdir "$$stage"
+	trap 'rm -rf "$$work" "$$stage"' EXIT HUP INT TERM
+	cp "$$work/unpacked/nvim" "$$stage/nvim"
+	cp "$$work/unpacked/lazydiff" "$$stage/lazydiff"
+	mv "$$stage/nvim" "$$BINDIR/nvim"
+	mv "$$stage/lazydiff" "$$BINDIR/lazydiff"
+	rmdir "$$stage"
+
+	cache_base=$${XDG_CACHE_HOME:-"$$HOME/.cache"}
+	rm -rf "$$cache_base/nvim-portable"
+
+	echo "Installed $$BINDIR/nvim"
+	echo "Installed $$BINDIR/lazydiff"
+	case :$${PATH:-}: in
+	  *:"$$BINDIR":*) ;;
+	  *) echo "Add $$BINDIR to PATH to use these commands." ;;
+	esac
+	INSTALLER
+	chmod 755 "$(RELEASE_DIR)/install.sh"
+	cd "$(RELEASE_DIR)"
+	sha256sum nvim-linux-x86_64.tar.gz nvim-linux-arm64.tar.gz > SHA256SUMS
+	echo "Built release assets in $(RELEASE_DIR)/"
+
+publish:
+	set -eu
+	command -v gh >/dev/null 2>&1 || { echo 'publish requires the GitHub CLI (gh)' >&2; exit 127; }
+	gh auth status >/dev/null
+	BRANCH=$$(git branch --show-current)
+	[ "$$BRANCH" = main ] || { echo "publish must run from main (current: $${BRANCH:-detached HEAD})" >&2; exit 1; }
+	[ -z "$$(git status --porcelain)" ] || { echo 'publish requires a clean worktree' >&2; exit 1; }
+	LOCAL_HEAD=$$(git rev-parse HEAD)
+	REMOTE_HEAD=$$(git ls-remote origin refs/heads/main | awk '{print $$1}')
+	[ -n "$$REMOTE_HEAD" ] || { echo 'could not resolve origin/main' >&2; exit 1; }
+	[ "$$LOCAL_HEAD" = "$$REMOTE_HEAD" ] || { echo 'main must be pushed and match origin/main before publishing' >&2; exit 1; }
+	LATEST=$$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')
+	if [ -z "$$LATEST" ]; then
+	  VERSION=v0.1.0
+	else
+	  printf '%s\n' "$$LATEST" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "latest stable release has unsupported tag: $$LATEST" >&2; exit 1; }
+	  NUMBERS=$${LATEST#v}
+	  OLD_IFS=$$IFS
+	  IFS=.
+	  set -- $$NUMBERS
+	  IFS=$$OLD_IFS
+	  VERSION="v$$1.$$2.$$(( $$3 + 1 ))"
+	fi
+	gh release view "$$VERSION" >/dev/null 2>&1 && { echo "release already exists: $$VERSION" >&2; exit 1; } || true
+	echo "Publishing $$VERSION from $$LOCAL_HEAD..."
+	$(MAKE) release-assets
+	gh release create "$$VERSION" \
+	  "$(RELEASE_DIR)/nvim-linux-x86_64.tar.gz" \
+	  "$(RELEASE_DIR)/nvim-linux-arm64.tar.gz" \
+	  "$(RELEASE_DIR)/SHA256SUMS" \
+	  "$(RELEASE_DIR)/install.sh" \
+	  --target "$$LOCAL_HEAD" --title "$$VERSION" --generate-notes --fail-on-no-commits --latest
+	gh api --paginate 'repos/{owner}/{repo}/releases?per_page=100' --jq '.[].tag_name' | while IFS= read -r OLD_VERSION; do
+	  [ -n "$$OLD_VERSION" ] || continue
+	  [ "$$OLD_VERSION" = "$$VERSION" ] || gh release delete "$$OLD_VERSION" --yes
+	done
+	gh release view "$$VERSION" --json url --jq .url
 
 clean:
 	rm -rf "$(DIST_DIR)"
