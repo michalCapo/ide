@@ -1,5 +1,5 @@
 -- Two-key viewport word jump.
--- Press `ss`, then type the two-character label drawn over a visible word.
+-- Press `s`, then type the two-character label drawn over a visible word.
 
 local M = {}
 
@@ -201,7 +201,6 @@ function M.search()
   vim.cmd("redraw")
 end
 
-vim.keymap.set("n", "s", "<Nop>", { desc = "No action; press ss for visible-word jump" })
-vim.keymap.set("n", "ss", M.search, { desc = "Jump to a visible word by its two-key label" })
+vim.keymap.set("n", "s", M.search, { desc = "Jump to a visible word by its two-key label" })
 
 return M

@@ -2404,7 +2404,8 @@ _G.nvim_keymap_search_groups = {
     items = {
       { "<leader><leader>", "Find files" },
       { "<leader>,", "Find open buffers" },
-      { "sf / sb", "Search word under cursor forward/backward" },
+      { "ff / fb", "Search word under cursor forward/backward" },
+      { "s", "Jump to a visible word" },
       { "<leader>s s", "Search text in project" },
       { "<leader>s w", "Search word under cursor" },
       { "visual <leader>s w", "Search selection" },
@@ -3543,8 +3544,8 @@ end
 vim.keymap.set("n", "<leader>ss", project_grep_prompt, { desc = "Search text in project" })
 vim.keymap.set("n", "<leader>sw", project_grep_word, { desc = "Search word in project" })
 vim.keymap.set("x", "<leader>sw", project_grep_selection, { desc = "Search selection in project" })
-vim.keymap.set("n", "sf", "*", { desc = "Search word under cursor forward" })
-vim.keymap.set("n", "sb", "#", { desc = "Search word under cursor backward" })
+vim.keymap.set("n", "ff", "*", { desc = "Search word under cursor forward" })
+vim.keymap.set("n", "fb", "#", { desc = "Search word under cursor backward" })
 
 local function typescript_project_root()
   return vim.fs.root(0, { "tsconfig.json", "package.json", ".git" }) or vim.fn.getcwd()
@@ -7592,9 +7593,8 @@ vim.keymap.set("n", "<leader>ae", function()
   require("agent").fix_error()
 end, { desc = "Agent: fix error at cursor (background)" })
 
--- Some modules install prefix maps during setup (notably views.search for s),
--- so register these browsers last. Their contents are still collected live.
-for _, prefix in ipairs({ "g", "s" }) do
+-- Register the g-prefix browser after modules install their mappings.
+for _, prefix in ipairs({ "g" }) do
   vim.keymap.set("n", prefix, function()
     which_key_prompt({ prefix }, which_key_feed_native)
   end, {
