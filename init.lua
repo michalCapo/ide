@@ -134,12 +134,16 @@ vim.g.go_highlight_extra_types = 1
 vim.g.go_highlight_variable_declarations = 1
 vim.g.go_highlight_variable_assignments = 1
 
--- VS Code theme, matching ~/.config/nvim
-pcall(vim.cmd, "packadd vscode-theme")
+-- Prefer the VS Code theme bundled beside this configuration. Keep the lazy
+-- path as a fallback for older installations of this config.
 do
-  local vscode_lazy_path = vim.fn.stdpath("data") .. "/lazy/vscode-theme"
-  if vim.uv.fs_stat(vscode_lazy_path) then
-    vim.opt.runtimepath:prepend(vscode_lazy_path)
+  local config_path = vim.env.NVIM_PORTABLE_INIT or debug.getinfo(1, "S").source:sub(2)
+  local bundled_path = vim.fs.dirname(vim.fs.normalize(config_path)) .. "/vscode-theme"
+  local lazy_path = vim.fn.stdpath("data") .. "/lazy/vscode-theme"
+  if vim.uv.fs_stat(bundled_path) then
+    vim.opt.runtimepath:prepend(bundled_path)
+  elseif vim.uv.fs_stat(lazy_path) then
+    vim.opt.runtimepath:prepend(lazy_path)
   end
 end
 

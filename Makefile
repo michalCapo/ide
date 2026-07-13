@@ -14,7 +14,7 @@ NVIM_URL := https://github.com/neovim/neovim/releases/download/$(NVIM_VERSION)/n
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= nvim
-VSCODE_THEME_DIR ?= $(HOME)/.local/share/nvim/lazy/vscode-theme
+VSCODE_THEME_DIR := vscode-theme
 PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
 
 .PHONY: all help build update install clean
@@ -50,7 +50,7 @@ build: $(NVIM_ARCHIVE)
 	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
 	test -f init.lua || { echo "init.lua is missing" >&2; exit 1; }
 	test -d lua || { echo "lua/ is missing" >&2; exit 1; }
-	test -d "$(VSCODE_THEME_DIR)" || { echo "Theme is missing: $(VSCODE_THEME_DIR)" >&2; exit 1; }
+	test -d "$(VSCODE_THEME_DIR)" || { echo "Bundled theme is missing: $(VSCODE_THEME_DIR)" >&2; exit 1; }
 	WORK=$$(mktemp -d)
 	trap 'rm -rf "$$WORK"' EXIT HUP INT TERM
 	mkdir -p "$$WORK/payload/config" "$(DIST_DIR)"

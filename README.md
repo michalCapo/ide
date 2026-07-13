@@ -8,8 +8,8 @@ self-extracting launcher. It also creates a `lazydiff` companion command.
 
 - Linux (`x86_64` or `arm64`)
 - `make`, `curl`, `tar`, and `sha256sum`
-- The VS Code theme installed at
-  `~/.local/share/nvim/lazy/vscode-theme`
+
+The VS Code theme is included in this repository.
 
 ## Build and install
 

@@ -23,10 +23,13 @@ local function setup_ui()
   -- view's highlights (DiffAdd/Change/Delete, Directory, and its own
   -- light/dark branch) look identical to opening it via <leader>gd inside
   -- Neovim.
-  pcall(vim.cmd, "packadd vscode-theme")
-  local vscode_path = vim.fn.stdpath("data") .. "/lazy/vscode-theme"
-  if vim.uv.fs_stat(vscode_path) then
-    vim.opt.runtimepath:prepend(vscode_path)
+  local config_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
+  local bundled_path = config_root .. "/vscode-theme"
+  local lazy_path = vim.fn.stdpath("data") .. "/lazy/vscode-theme"
+  if vim.uv.fs_stat(bundled_path) then
+    vim.opt.runtimepath:prepend(bundled_path)
+  elseif vim.uv.fs_stat(lazy_path) then
+    vim.opt.runtimepath:prepend(lazy_path)
   end
 
   -- Mirror preferred_editor_background(): NVIM_BACKGROUND override, else the
