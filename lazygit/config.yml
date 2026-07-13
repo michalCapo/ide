@@ -25,6 +25,11 @@ gui:
 # not under gui.)
 promptToReturnFromSubprocess: false
 
+# Skip Lazygit's first-run welcome/release popup. The portable runtime cache is
+# replaced on install, so relying on Lazygit's persisted dismissal would show
+# the popup again after every `make install`.
+disableStartupPopups: true
+
 # Reuse the parent Neovim when Lazygit is running in one of its terminals.
 # The helper asks the parent to close Lazygit before opening the selected file;
 # when Lazygit is standalone it falls back to launching Neovim normally.
