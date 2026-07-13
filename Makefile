@@ -194,10 +194,12 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 install: build
 	install -d "$(BINDIR)"
 	install -m 755 "$(NVIM_OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
+	ln -sfn "$(INSTALL_NAME)" "$(BINDIR)/vim"
 	install -m 755 "$(LAZYDIFF_OUTPUT)" "$(BINDIR)/$(LAZYDIFF_NAME)"
 	install -m 755 "$(LAZYGIT_OUTPUT)" "$(BINDIR)/$(LAZYGIT_NAME)"
 	if [ "$(ARCH)" = x86_64 ]; then install -m 755 "$(VIFM_OUTPUT)" "$(BINDIR)/$(VIFM_NAME)"; fi
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
+	echo "Linked $(BINDIR)/vim -> $(INSTALL_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYGIT_NAME)"
 	if [ "$(ARCH)" = x86_64 ]; then echo "Installed $(BINDIR)/$(VIFM_NAME)"; fi
@@ -261,9 +263,11 @@ release-assets:
 	for command_name in $$commands; do cp "$$work/unpacked/$$command_name" "$$stage/$$command_name"; done
 	for command_name in $$commands; do mv "$$stage/$$command_name" "$$BINDIR/$$command_name"; done
 	rmdir "$$stage"
+	ln -sfn nvim "$$BINDIR/vim"
 	cache_base=$${XDG_CACHE_HOME:-"$$HOME/.cache"}
 	rm -rf "$$cache_base/nvim-portable" "$$cache_base/lazygit-portable" "$$cache_base/vifm-portable"
 	for command_name in $$commands; do echo "Installed $$BINDIR/$$command_name"; done
+	echo "Linked $$BINDIR/vim -> nvim"
 	case :$${PATH:-}: in
 	  *:"$$BINDIR":*) ;;
 	  *) echo "Add $$BINDIR to PATH to use these commands." ;;

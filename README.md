@@ -38,7 +38,7 @@ curl -fsSL https://github.com/michalCapo/nvim/releases/latest/download/install.s
 
 This verifies the release checksum and installs the commands supported by the
 current architecture into `~/.local/bin`. Add that directory to `PATH` if
-needed.
+needed. It also creates `~/.local/bin/vim` as a symlink to `nvim`.
 
 To build and install from a checkout:
 
@@ -48,7 +48,7 @@ make install
 ```
 
 `make build` writes commands to `dist/`. `make install` installs them to
-`~/.local/bin` by default.
+`~/.local/bin` by default and creates a `vim` symlink beside `nvim`.
 
 Build settings can be overridden on the command line:
 
