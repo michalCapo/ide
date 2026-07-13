@@ -15,6 +15,7 @@ PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= nvim
 VSCODE_THEME_DIR := vscode-theme
+NVIM_DAP_DIR := nvim-dap
 PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
 
 .PHONY: all help build update install clean
@@ -51,6 +52,7 @@ build: $(NVIM_ARCHIVE)
 	test -f init.lua || { echo "init.lua is missing" >&2; exit 1; }
 	test -d lua || { echo "lua/ is missing" >&2; exit 1; }
 	test -d "$(VSCODE_THEME_DIR)" || { echo "Bundled theme is missing: $(VSCODE_THEME_DIR)" >&2; exit 1; }
+	test -d "$(NVIM_DAP_DIR)" || { echo "Bundled nvim-dap is missing: $(NVIM_DAP_DIR)" >&2; exit 1; }
 	WORK=$$(mktemp -d)
 	trap 'rm -rf "$$WORK"' EXIT HUP INT TERM
 	mkdir -p "$$WORK/payload/config" "$(DIST_DIR)"
@@ -59,6 +61,7 @@ build: $(NVIM_ARCHIVE)
 	cp init.lua "$$WORK/payload/config/init.lua"
 	cp -R lua "$$WORK/payload/config/lua"
 	cp -R "$(VSCODE_THEME_DIR)" "$$WORK/payload/config/vscode-theme"
+	cp -R "$(NVIM_DAP_DIR)" "$$WORK/payload/config/nvim-dap"
 	CONFIG_HASH=$$(cd "$$WORK/payload/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
 	NVIM_HASH=$$(sha256sum "$(NVIM_ARCHIVE)" | cut -d' ' -f1)
 	PAYLOAD_ID=$$(printf '%s\n' '$(NVIM_VERSION)-$(ARCH)' "$$NVIM_HASH" "$$CONFIG_HASH" | sha256sum | cut -c1-16)

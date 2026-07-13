@@ -1,7 +1,7 @@
 # nvim
 
 Personal Neovim configuration packaged as a portable Linux executable. The
-build bundles Neovim, this Lua configuration, and the VS Code theme into a
+build bundles Neovim, this Lua configuration, the VS Code theme, and nvim-dap into a
 self-extracting launcher. It also creates a `lazydiff` companion command.
 
 ## Requirements
@@ -9,7 +9,7 @@ self-extracting launcher. It also creates a `lazydiff` companion command.
 - Linux (`x86_64` or `arm64`)
 - `make`, `curl`, `tar`, and `sha256sum`
 
-The VS Code theme is included in this repository.
+The VS Code theme and nvim-dap are included in this repository.
 
 ## Build and install
 

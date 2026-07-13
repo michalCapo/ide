@@ -2509,8 +2509,6 @@ _G.nvim_keymap_search_groups = {
       { "<leader>dy", "Copy runtime value to clipboard" },
       { ":DapValue {expression}", "Evaluate expression in a popup" },
       { "<leader>ds", "Show scopes" },
-      { ":DapInstallNvimDap", "Install nvim-dap manually" },
-      { ":DapNvimDapInstallLog", "Show nvim-dap install log" },
       { ":DapInstallJsDebug", "Install JS/TS debug adapter" },
       { ":DapJsDebugInstallLog", "Show JS/TS adapter install log" },
     },
@@ -6221,65 +6219,14 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
--- Debugging support for JS/TS and Go (nvim-dap)
-local nvim_dap_dir = config_dir .. "/lua/dap"
-local nvim_dap_auto_marker = vim.fn.stdpath("data") .. "/dap_adapters/.nvim-dap-auto-install-attempted"
-local nvim_dap_install_log = vim.fn.stdpath("data") .. "/dap_adapters/nvim-dap-install.log"
-
-local function install_nvim_dap()
-  if vim.uv.fs_stat(nvim_dap_dir) then
-    return true
-  end
-  if vim.fn.executable("git") ~= 1 then
-    vim.notify("git not found. Install nvim-dap manually for debugging support.", vim.log.levels.WARN)
-    return false
-  end
-
-  vim.fn.mkdir(vim.fn.fnamemodify(nvim_dap_dir, ":h"), "p")
-  vim.fn.mkdir(vim.fn.fnamemodify(nvim_dap_install_log, ":h"), "p")
-  vim.notify("Installing nvim-dap...", vim.log.levels.INFO)
-  local result = vim.fn.system({ "git", "clone", "--filter=blob:none", "https://codeberg.org/mfussenegger/nvim-dap.git", nvim_dap_dir })
-  vim.fn.writefile(vim.split(result, "\n", { plain = true }), nvim_dap_install_log)
-  if vim.v.shell_error ~= 0 then
-    vim.notify("Could not install nvim-dap. See " .. nvim_dap_install_log, vim.log.levels.ERROR)
-    return false
-  end
-  vim.opt.runtimepath:prepend(nvim_dap_dir)
-  return true
-end
-
-pcall(vim.api.nvim_create_user_command, "DapInstallNvimDap", function()
-  if install_nvim_dap() then
-    vim.notify("nvim-dap installed. Restart Neovim or run :source %.", vim.log.levels.INFO)
-  end
-end, { desc = "Install nvim-dap" })
-
-pcall(vim.api.nvim_create_user_command, "DapNvimDapInstallLog", function()
-  if vim.uv.fs_stat(nvim_dap_install_log) then
-    vim.cmd.edit(vim.fn.fnameescape(nvim_dap_install_log))
-  else
-    vim.notify("No nvim-dap install log yet: " .. nvim_dap_install_log, vim.log.levels.INFO)
-  end
-end, { desc = "Open nvim-dap install log" })
+-- Debugging support for JS/TS and Go (bundled nvim-dap)
+local nvim_dap_dir = config_dir .. "/nvim-dap"
 
 local function ensure_nvim_dap()
-  if pcall(require, "dap") then
-    return true
-  end
-
   if vim.uv.fs_stat(nvim_dap_dir) then
     vim.opt.runtimepath:prepend(nvim_dap_dir)
     return pcall(require, "dap")
   end
-
-  -- Try automatically only once. If it fails, do not spam every startup;
-  -- run :DapInstallNvimDap manually to retry and :DapNvimDapInstallLog for logs.
-  if not vim.uv.fs_stat(nvim_dap_auto_marker) and #vim.api.nvim_list_uis() > 0 then
-    vim.fn.mkdir(vim.fn.fnamemodify(nvim_dap_auto_marker, ":h"), "p")
-    vim.fn.writefile({ os.date("%Y-%m-%d %H:%M:%S") }, nvim_dap_auto_marker)
-    return install_nvim_dap()
-  end
-
   return false
 end
 
