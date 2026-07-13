@@ -1,0 +1,11 @@
+# Generated portable executable
+/dist/
+
+# Cached official Neovim download
+/.cache/
+
+# Local binary and editor temporary files
+/nvim
+*.swp
+*.swo
+*~
