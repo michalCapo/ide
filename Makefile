@@ -15,6 +15,7 @@ PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= nvim
 VSCODE_THEME_DIR ?= $(HOME)/.local/share/nvim/lazy/vscode-theme
+PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
 
 .PHONY: all help build update install clean
 
@@ -58,7 +59,9 @@ build: $(NVIM_ARCHIVE)
 	cp init.lua "$$WORK/payload/config/init.lua"
 	cp -R lua "$$WORK/payload/config/lua"
 	cp -R "$(VSCODE_THEME_DIR)" "$$WORK/payload/config/vscode-theme"
-	PAYLOAD_ID=$$(printf '%s\n' '$(NVIM_VERSION)-$(ARCH)' | sha256sum | cut -c1-16)
+	CONFIG_HASH=$$(cd "$$WORK/payload/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+	NVIM_HASH=$$(sha256sum "$(NVIM_ARCHIVE)" | cut -d' ' -f1)
+	PAYLOAD_ID=$$(printf '%s\n' '$(NVIM_VERSION)-$(ARCH)' "$$NVIM_HASH" "$$CONFIG_HASH" | sha256sum | cut -c1-16)
 	STUB="$$WORK/stub"
 	cat >"$$STUB" <<'LAUNCHER'
 	#!/bin/sh
@@ -111,6 +114,8 @@ install: build
 	install -m 755 "$(LAZYDIFF_OUTPUT)" "$(BINDIR)/$(LAZYDIFF_NAME)"
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
+	rm -rf "$(PORTABLE_CACHE_DIR)"
+	echo "Cleared $(PORTABLE_CACHE_DIR)"
 	$(MAKE) clean
 
 clean:

@@ -3,11 +3,8 @@ local M = {}
 local state = {
   root = nil,
   files = {},
-  tree_entries = {},
   index = 1,
   tabpage = nil,
-  sidebar_win = nil,
-  sidebar_buf = nil,
   diff_win = nil,
   diff_buf = nil,
   diff_winbar = nil,
@@ -19,13 +16,7 @@ local state = {
   commit_prompt_buf = nil,
   commit_history = nil,
   commit_history_index = nil,
-  branches = {},
-  branch_index = 1,
-  branches_win = nil,
-  branches_buf = nil,
   diff_cache = {},
-  sidebar_preview_timer = nil,
-  sidebar_pending_file_index = nil,
 }
 
 local namespace = vim.api.nvim_create_namespace("git_diff_view")
@@ -46,9 +37,6 @@ local function apply_view_highlights()
   vim.api.nvim_set_hl(0, "GitDiffViewFileTabPath", { link = "TabLine" })
   vim.api.nvim_set_hl(0, "GitDiffViewFileTabAdd", { link = "DiffAdd" })
   vim.api.nvim_set_hl(0, "GitDiffViewFileTabDelete", { link = "DiffDelete" })
-  vim.api.nvim_set_hl(0, "GitDiffViewBranchPush", { link = "DiffAdd" })
-  vim.api.nvim_set_hl(0, "GitDiffViewBranchPull", { link = "DiffChange" })
-  vim.api.nvim_set_hl(0, "GitDiffViewBranchSynced", { link = "Comment" })
 end
 
 local function system(args, opts)
@@ -81,20 +69,6 @@ local function git(args, opts)
   end
   vim.list_extend(full_args, args)
   return system(full_args, opts)
-end
-
-local function git_async(args, on_done)
-  local full_args = { "git" }
-  if state.root then
-    table.insert(full_args, "-C")
-    table.insert(full_args, state.root)
-  end
-  vim.list_extend(full_args, args)
-  vim.system(full_args, { text = true }, function(result)
-    vim.schedule(function()
-      on_done(result)
-    end)
-  end)
 end
 
 local function repo_root()
@@ -176,22 +150,11 @@ local function wipe_buffer(buf)
   end
 end
 
-local function cancel_sidebar_preview_timer()
-  if state.sidebar_preview_timer then
-    state.sidebar_preview_timer:stop()
-    state.sidebar_preview_timer:close()
-    state.sidebar_preview_timer = nil
-  end
-  state.sidebar_pending_file_index = nil
-end
-
 local function close()
   local had_active_view = state.tabpage and vim.api.nvim_tabpage_is_valid(state.tabpage)
-      or state.sidebar_buf and vim.api.nvim_buf_is_valid(state.sidebar_buf)
       or state.diff_buf and vim.api.nvim_buf_is_valid(state.diff_buf)
 
   pcall(vim.cmd, "diffoff!")
-  cancel_sidebar_preview_timer()
   if state.previous_showtabline then
     vim.o.showtabline = state.previous_showtabline
   end
@@ -201,23 +164,16 @@ local function close()
     pcall(vim.cmd, "tabclose")
   end
 
-  for _, win in ipairs({ state.sidebar_win, state.branches_win, state.diff_win, state.commit_prompt_win }) do
+  for _, win in ipairs({ state.diff_win, state.commit_prompt_win }) do
     if win and vim.api.nvim_win_is_valid(win) then
       pcall(vim.api.nvim_win_close, win, true)
     end
   end
-  for _, buf in ipairs({ state.sidebar_buf, state.branches_buf, state.diff_buf, state.commit_prompt_buf }) do
+  for _, buf in ipairs({ state.diff_buf, state.commit_prompt_buf }) do
     wipe_buffer(buf)
   end
 
-  state.tree_entries = {}
   state.tabpage = nil
-  state.sidebar_win = nil
-  state.sidebar_buf = nil
-  state.branches_win = nil
-  state.branches_buf = nil
-  state.branches = {}
-  state.branch_index = 1
   state.diff_win = nil
   state.diff_buf = nil
   state.diff_winbar = nil
@@ -439,14 +395,7 @@ local function jump_change_or_file(backward)
   end
 end
 
-local build_tree_entries
-local show_sidebar
-local show_branches
-local render_sidebar
-local render_branches
-local refresh_branches
 local refresh_everything
-local focus_branches
 
 local function refresh_after_discard(path)
   local files, err = changed_files()
@@ -462,7 +411,6 @@ local function refresh_after_discard(path)
   end
 
   state.files = files
-  build_tree_entries()
 
   local next_index = math.min(state.index, #state.files)
   for index, file in ipairs(state.files) do
@@ -553,80 +501,6 @@ function M.discard_current_block()
   refresh_after_discard(file.path)
 end
 
-local function discard_file_changes(file)
-  if file.status:find("%?") then
-    local ok, err = pcall(vim.fn.delete, state.root .. "/" .. file.path, "rf")
-    if ok and err ~= 0 then
-      return false, "delete failed"
-    end
-    return ok, err
-  end
-
-  local _, err = git({ "restore", "--source=HEAD", "--staged", "--worktree", "--", file.path })
-  return err == nil, err
-end
-
-function M.discard_file(index)
-  index = index or state.index
-  local file = state.files[index]
-  if not file then
-    return
-  end
-  state.index = index
-  if not confirm_discard("Discard all changes in " .. file.path .. "?") then
-    return
-  end
-
-  local ok, err = discard_file_changes(file)
-  if not ok then
-    vim.notify("Git diff view: failed to discard file: " .. tostring(err), vim.log.levels.ERROR)
-    return
-  end
-
-  vim.notify("Git diff view: discarded " .. file.path, vim.log.levels.INFO)
-  refresh_after_discard(file.path)
-end
-
-function M.discard_folder(path)
-  path = path or ""
-  local files = {}
-  local prefix = path ~= "" and (path .. "/") or nil
-  for index, file in ipairs(state.files) do
-    if not prefix or file.path:sub(1, #prefix) == prefix then
-      table.insert(files, { index = index, file = file })
-    end
-  end
-
-  local label = path ~= "" and (path .. "/") or "the repository"
-  if #files == 0 then
-    vim.notify("Git diff view: no changed files in " .. label, vim.log.levels.WARN)
-    return
-  end
-  if not confirm_discard(string.format("Discard all changes in %s (%d files)?", label, #files)) then
-    return
-  end
-
-  state.index = files[1].index
-  local failures = {}
-  for _, item in ipairs(files) do
-    local ok, err = discard_file_changes(item.file)
-    if not ok then
-      table.insert(failures, item.file.path .. ": " .. tostring(err))
-    end
-  end
-
-  if path ~= "" then
-    pcall(vim.fn.delete, state.root .. "/" .. path, "d")
-  end
-
-  if #failures > 0 then
-    vim.notify("Git diff view: failed to discard some files:\n" .. table.concat(failures, "\n"), vim.log.levels.ERROR)
-  else
-    vim.notify(string.format("Git diff view: discarded %d files in %s", #files, label), vim.log.levels.INFO)
-  end
-  refresh_after_discard(path)
-end
-
 local function any_staged()
   for _, file in ipairs(state.files) do
     if status_is_staged(file.status) then
@@ -649,7 +523,6 @@ local function after_stage_change()
   end
 
   state.files = files
-  build_tree_entries()
   state.index = 1
   for index, file in ipairs(files) do
     if file.path == current then
@@ -657,68 +530,11 @@ local function after_stage_change()
       break
     end
   end
-  render_sidebar()
 end
 
 local function stage_file(file)
   local _, err = git({ "add", "-A", "--", file.path })
   return err
-end
-
-local function unstage_file(file)
-  local _, err = git({ "restore", "--staged", "--", file.path }, { allowed_codes = { 0, 1 } })
-  return err
-end
-
-local function apply_file_stage(file, stage)
-  if stage then
-    return stage_file(file)
-  end
-  return unstage_file(file)
-end
-
-function M.toggle_file_stage(index)
-  local file = state.files[index or state.index]
-  if not file then
-    return
-  end
-  local err = apply_file_stage(file, status_has_unstaged(file.status))
-  if err then
-    vim.notify("Git diff view: failed to stage file: " .. err, vim.log.levels.ERROR)
-    return
-  end
-  after_stage_change()
-end
-
-function M.toggle_folder_stage(path)
-  path = path or ""
-  local prefix = path ~= "" and (path .. "/") or nil
-  local matched = {}
-  local stage = false
-  for _, file in ipairs(state.files) do
-    if not prefix or file.path:sub(1, #prefix) == prefix then
-      table.insert(matched, file)
-      if status_has_unstaged(file.status) then
-        stage = true
-      end
-    end
-  end
-  if #matched == 0 then
-    vim.notify("Git diff view: no changed files to stage", vim.log.levels.WARN)
-    return
-  end
-
-  local failures = {}
-  for _, file in ipairs(matched) do
-    local err = apply_file_stage(file, stage)
-    if err then
-      table.insert(failures, file.path .. ": " .. err)
-    end
-  end
-  if #failures > 0 then
-    vim.notify("Git diff view: failed to stage some files:\n" .. table.concat(failures, "\n"), vim.log.levels.ERROR)
-  end
-  after_stage_change()
 end
 
 function M.stage_current_block()
@@ -803,15 +619,7 @@ local function edit_current_file()
   local row = 1
   local col = 0
 
-  if state.sidebar_win and vim.api.nvim_get_current_win() == state.sidebar_win then
-    local entry = state.tree_entries[vim.api.nvim_win_get_cursor(state.sidebar_win)[1]]
-    if entry and entry.kind == "file" then
-      file = state.files[entry.file_index]
-    elseif entry and entry.kind == "dir" then
-      vim.notify("Git diff view: select a file to edit", vim.log.levels.WARN)
-      return
-    end
-  elseif state.diff_win and vim.api.nvim_win_is_valid(state.diff_win) then
+  if state.diff_win and vim.api.nvim_win_is_valid(state.diff_win) then
     local cursor = vim.api.nvim_win_get_cursor(state.diff_win)
     row = nearest_source_row(cursor[1])
     col = math.max((cursor[2] or 0) - 2, 0)
@@ -931,97 +739,7 @@ local function commit_all_changes(message)
   refresh_everything(nil)
 end
 
-local function load_branches()
-  local output = git({
-    "for-each-ref",
-    "--format=%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track)",
-    "refs/heads",
-  }, { allowed_codes = { 0, 128 } })
-
-  local branches = {}
-  for _, line in ipairs(vim.split(output or "", "\n", { plain = true })) do
-    if line ~= "" then
-      local parts = vim.split(line, "\0", { plain = true })
-      local name = parts[2]
-      if name and name ~= "" then
-        local track = parts[4] or ""
-        table.insert(branches, {
-          current = parts[1] == "*",
-          name = name,
-          upstream = parts[3] ~= "" and parts[3] or nil,
-          ahead = tonumber(track:match("ahead (%d+)")) or 0,
-          behind = tonumber(track:match("behind (%d+)")) or 0,
-        })
-      end
-    end
-  end
-  return branches
-end
-
-local function current_branch_name()
-  for _, branch in ipairs(state.branches) do
-    if branch.current then
-      return branch.name
-    end
-  end
-  local output = git({ "rev-parse", "--abbrev-ref", "HEAD" }, { allowed_codes = { 0, 128 } })
-  return output and vim.trim(output) or nil
-end
-
-local function checkout_branch(name)
-  if not name then
-    return
-  end
-  local _, err = git({ "checkout", name })
-  if err then
-    vim.notify("Git diff view: failed to checkout " .. name .. ": " .. err, vim.log.levels.ERROR)
-    return
-  end
-  vim.notify("Git diff view: checked out " .. name, vim.log.levels.INFO)
-  refresh_everything(nil)
-end
-
-function M.pull()
-  vim.notify("Git diff view: pulling…", vim.log.levels.INFO)
-  git_async({ "pull", "--ff-only" }, function(result)
-    if result.code ~= 0 then
-      vim.notify("Git diff view: pull failed: " .. vim.trim(result.stderr or result.stdout or ""), vim.log.levels.ERROR)
-      return
-    end
-    vim.notify("Git diff view: pulled", vim.log.levels.INFO)
-    local keep = state.files[state.index] and state.files[state.index].path
-    refresh_everything(keep)
-  end)
-end
-
-function M.push()
-  local branch = current_branch_name()
-  vim.notify("Git diff view: pushing…", vim.log.levels.INFO)
-  git_async({ "push" }, function(result)
-    if result.code == 0 then
-      vim.notify("Git diff view: pushed", vim.log.levels.INFO)
-      refresh_branches()
-      return
-    end
-
-    local message = vim.trim(result.stderr or result.stdout or "")
-    if branch and message:lower():find("upstream") then
-      git_async({ "push", "--set-upstream", "origin", branch }, function(result2)
-        if result2.code ~= 0 then
-          vim.notify("Git diff view: push failed: " .. vim.trim(result2.stderr or result2.stdout or ""), vim.log.levels.ERROR)
-          return
-        end
-        vim.notify("Git diff view: pushed and set upstream origin/" .. branch, vim.log.levels.INFO)
-        refresh_branches()
-      end)
-      return
-    end
-
-    vim.notify("Git diff view: push failed: " .. message, vim.log.levels.ERROR)
-  end)
-end
-
--- Reload the working-tree status, diff, and branch state from git, keeping the
+-- Reload the working-tree status and diff, keeping the
 -- current file selected when it still has changes. Closes the view if nothing
 -- is left to show.
 function M.refresh()
@@ -1144,12 +862,6 @@ local function open_commit_prompt()
   vim.cmd("startinsert!")
 end
 
-focus_branches = function()
-  if state.branches_win and vim.api.nvim_win_is_valid(state.branches_win) then
-    vim.api.nvim_set_current_win(state.branches_win)
-  end
-end
-
 local function configure_diff_keymaps(buf)
   local opts = { buffer = buf, silent = true }
   vim.keymap.set("n", "q", close, vim.tbl_extend("force", opts, { desc = "Close git diff view" }))
@@ -1157,15 +869,7 @@ local function configure_diff_keymaps(buf)
   vim.keymap.set("n", "l", function() jump_change_or_file(false) end, vim.tbl_extend("force", opts, { desc = "Next change" }))
   vim.keymap.set("n", "n", function() M.next_file("first_group") end, vim.tbl_extend("force", opts, { desc = "Next file, first change" }))
   vim.keymap.set("n", "N", function() M.previous_file("last_group") end, vim.tbl_extend("force", opts, { desc = "Previous file, last change" }))
-  vim.keymap.set("n", "<Esc>", function()
-    -- Single-file mode has no file tree; Esc closes the view instead (so a
-    -- lazygit-launched review returns to lazygit with either q or Esc).
-    if state.single_file then
-      close()
-    elseif show_sidebar then
-      show_sidebar(true)
-    end
-  end, vim.tbl_extend("force", opts, { desc = "Show file tree" }))
+  vim.keymap.set("n", "<Esc>", close, vim.tbl_extend("force", opts, { desc = "Close git diff view" }))
   vim.keymap.set("n", "j", function() move_within_change_block(false) end, vim.tbl_extend("force", opts, { desc = "Move within/next diff block" }))
   vim.keymap.set("n", "k", function() move_within_change_block(true) end, vim.tbl_extend("force", opts, { desc = "Move within/previous diff block" }))
   vim.keymap.set("n", "]c", function() jump_change(false) end, vim.tbl_extend("force", opts, { desc = "Next change" }))
@@ -1175,11 +879,8 @@ local function configure_diff_keymaps(buf)
   vim.keymap.set("n", "d", M.discard_current_block, vim.tbl_extend("force", opts, { desc = "Discard current diff block" }))
   vim.keymap.set("n", "<Space>", M.stage_current_block, vim.tbl_extend("force", opts, { desc = "Stage current diff block" }))
   vim.keymap.set("n", "a", M.stage_all, vim.tbl_extend("force", opts, { desc = "Stage/unstage all changes" }))
-  vim.keymap.set("n", "p", M.pull, vim.tbl_extend("force", opts, { desc = "Pull" }))
-  vim.keymap.set("n", "P", M.push, vim.tbl_extend("force", opts, { desc = "Push" }))
   vim.keymap.set("n", "R", M.refresh, vim.tbl_extend("force", opts, { desc = "Refresh git diff view" }))
   vim.keymap.set("n", "L", M.open_lazygit, vim.tbl_extend("force", opts, { desc = "Open lazygit" }))
-  vim.keymap.set("n", "<Tab>", focus_branches, vim.tbl_extend("force", opts, { desc = "Focus local branches" }))
   vim.keymap.set("n", "c", open_commit_prompt, vim.tbl_extend("force", opts, { desc = "Commit changes" }))
   vim.keymap.set("n", "e", edit_current_file, vim.tbl_extend("force", opts, { desc = "Edit current file and close git diff view" }))
 end
@@ -1195,280 +896,6 @@ local function path_parts(path)
     table.insert(parts, part)
   end
   return parts
-end
-
-build_tree_entries = function()
-  local entries = {
-    {
-      kind = "dir",
-      depth = 0,
-      name = ".",
-      path = "",
-    },
-  }
-  local seen_dirs = {}
-
-  for file_index, file in ipairs(state.files) do
-    local parts = path_parts(file.path)
-    local prefix = {}
-    for i = 1, #parts - 1 do
-      table.insert(prefix, parts[i])
-      local dir_path = table.concat(prefix, "/")
-      if not seen_dirs[dir_path] then
-        table.insert(entries, {
-          kind = "dir",
-          depth = i,
-          name = parts[i],
-          path = dir_path,
-        })
-        seen_dirs[dir_path] = true
-      end
-    end
-
-    table.insert(entries, {
-      kind = "file",
-      depth = #parts,
-      name = parts[#parts] or file.path,
-      path = file.path,
-      file_index = file_index,
-      label = file.label,
-      status = file.status,
-    })
-  end
-
-  state.tree_entries = entries
-end
-
-local function current_file_tree_row()
-  for row, entry in ipairs(state.tree_entries) do
-    if entry.file_index == state.index then
-      return row
-    end
-  end
-  return 1
-end
-
-local function hide_sidebar()
-  if state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-    pcall(vim.api.nvim_win_close, state.sidebar_win, true)
-  end
-  state.sidebar_win = nil
-end
-
-local SIDEBAR_INDENT = " "
-local SIDEBAR_MIN_WIDTH = 22
-local SIDEBAR_MAX_FRACTION = 0.28
-
-local function sidebar_indent(depth)
-  return string.rep(SIDEBAR_INDENT, depth)
-end
-
-local function truncate_middle(text, max_width)
-  text = tostring(text or "")
-  if vim.fn.strdisplaywidth(text) <= max_width then
-    return text
-  end
-  if max_width <= 1 then
-    return "…"
-  end
-
-  local suffix_width = math.max(1, math.floor((max_width - 1) * 0.6))
-  local prefix_width = math.max(1, max_width - suffix_width - 1)
-  local prefix = text
-  local suffix = text
-
-  while vim.fn.strdisplaywidth(prefix) > prefix_width do
-    prefix = vim.fn.strcharpart(prefix, 0, math.max(vim.fn.strchars(prefix) - 1, 0))
-  end
-  while vim.fn.strdisplaywidth(suffix) > suffix_width do
-    suffix = vim.fn.strcharpart(suffix, 1)
-  end
-
-  return prefix .. "…" .. suffix
-end
-
-local function sidebar_window_max_width()
-  local max_width = math.max(SIDEBAR_MIN_WIDTH, math.floor(vim.o.columns * SIDEBAR_MAX_FRACTION))
-  if vim.o.columns > 60 then
-    max_width = math.min(max_width, vim.o.columns - 50)
-  end
-  return max_width
-end
-
-local function sidebar_line(entry, available_width)
-  local indent = sidebar_indent(entry.depth)
-  if entry.kind == "dir" then
-    local suffix = "/"
-    local max_name_width = math.max(1, (available_width or sidebar_window_max_width()) - vim.fn.strdisplaywidth(indent) - vim.fn.strdisplaywidth(suffix))
-    return indent .. truncate_middle(entry.name, max_name_width) .. suffix
-  end
-
-  local prefix = string.format("%s%s ", indent, entry.label)
-  local max_name_width = math.max(1, (available_width or sidebar_window_max_width()) - vim.fn.strdisplaywidth(prefix))
-  return prefix .. truncate_middle(entry.name, max_name_width)
-end
-
-local function sidebar_lines(window_width)
-  local available_width = math.max(1, (window_width or sidebar_window_max_width()) - 1)
-  local lines = {}
-  for _, entry in ipairs(state.tree_entries) do
-    table.insert(lines, sidebar_line(entry, available_width))
-  end
-  return lines
-end
-
-local function sidebar_content_width(lines)
-  local width = SIDEBAR_MIN_WIDTH
-  for _, line in ipairs(lines or sidebar_lines()) do
-    width = math.max(width, vim.fn.strdisplaywidth(line) + 1)
-  end
-
-  return math.min(width, sidebar_window_max_width())
-end
-
-local function resize_sidebar(lines)
-  if state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-    pcall(vim.api.nvim_win_set_width, state.sidebar_win, sidebar_content_width(lines))
-  end
-end
-
-render_sidebar = function()
-  if not state.sidebar_buf or not vim.api.nvim_buf_is_valid(state.sidebar_buf) then
-    return
-  end
-
-  local lines = sidebar_lines()
-
-  vim.api.nvim_set_option_value("readonly", false, { buf = state.sidebar_buf })
-  vim.api.nvim_set_option_value("modifiable", true, { buf = state.sidebar_buf })
-  vim.api.nvim_buf_set_lines(state.sidebar_buf, 0, -1, false, buffer_safe_lines(lines))
-  vim.api.nvim_buf_clear_namespace(state.sidebar_buf, namespace, 0, -1)
-  vim.api.nvim_set_option_value("modifiable", false, { buf = state.sidebar_buf })
-  vim.api.nvim_set_option_value("readonly", true, { buf = state.sidebar_buf })
-
-  for row, entry in ipairs(state.tree_entries) do
-    if entry.kind == "dir" then
-      vim.api.nvim_buf_add_highlight(state.sidebar_buf, namespace, "Directory", row - 1, 0, -1)
-    else
-      local status = entry.status or "  "
-      local status_start = #sidebar_indent(entry.depth)
-      local untracked = status:find("%?") ~= nil
-      local staged = status_is_staged(status)
-      local unstaged = status_has_unstaged(status)
-
-      if untracked then
-        vim.api.nvim_buf_add_highlight(state.sidebar_buf, namespace, "DiffDelete", row - 1, status_start, status_start + 2)
-      else
-        if staged then
-          vim.api.nvim_buf_add_highlight(state.sidebar_buf, namespace, "DiffAdd", row - 1, status_start, status_start + 1)
-        end
-        if unstaged then
-          local group = status:sub(2, 2) == "D" and "DiffDelete" or "DiffChange"
-          vim.api.nvim_buf_add_highlight(state.sidebar_buf, namespace, group, row - 1, status_start + 1, status_start + 2)
-        end
-      end
-
-      if staged and not unstaged then
-        vim.api.nvim_buf_add_highlight(state.sidebar_buf, namespace, "DiffAdd", row - 1, status_start + 3, -1)
-      end
-    end
-  end
-
-  if state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-    resize_sidebar(lines)
-    vim.api.nvim_win_set_cursor(state.sidebar_win, { current_file_tree_row(), 0 })
-  end
-end
-
--- Build a branch row as a list of {text, group} segments. Byte offsets are
--- derived from the segment lengths so multibyte glyphs highlight correctly.
-local function branch_segments(branch)
-  local segments = {
-    { text = branch.current and "* " or "  " },
-    { text = branch.name, group = branch.current and "GitDiffViewBranchSynced" or nil },
-  }
-
-  if not branch.upstream then
-    segments[#segments + 1] = { text = "  ⚑ no upstream", group = "GitDiffViewBranchSynced" }
-  elseif branch.behind == 0 and branch.ahead == 0 then
-    segments[#segments + 1] = { text = "  ✓", group = "GitDiffViewBranchSynced" }
-  else
-    if branch.behind > 0 then
-      segments[#segments + 1] = { text = "  ⇣" .. branch.behind, group = "GitDiffViewBranchPull" }
-    end
-    if branch.ahead > 0 then
-      segments[#segments + 1] = { text = "  ⇡" .. branch.ahead, group = "GitDiffViewBranchPush" }
-    end
-  end
-
-  return segments
-end
-
-local function current_branch_row()
-  for row, branch in ipairs(state.branches) do
-    if branch.current then
-      return row
-    end
-  end
-  return 1
-end
-
-render_branches = function()
-  if not state.branches_buf or not vim.api.nvim_buf_is_valid(state.branches_buf) then
-    return
-  end
-
-  apply_view_highlights()
-
-  local lines = {}
-  local marks = {}
-  for row, branch in ipairs(state.branches) do
-    local text = ""
-    for _, segment in ipairs(branch_segments(branch)) do
-      local start_col = #text
-      text = text .. segment.text
-      if segment.group then
-        table.insert(marks, { row = row - 1, start_col = start_col, end_col = #text, group = segment.group })
-      end
-    end
-    lines[row] = text
-  end
-  if #lines == 0 then
-    lines = { "(no local branches)" }
-  end
-
-  vim.api.nvim_set_option_value("readonly", false, { buf = state.branches_buf })
-  vim.api.nvim_set_option_value("modifiable", true, { buf = state.branches_buf })
-  vim.api.nvim_buf_set_lines(state.branches_buf, 0, -1, false, buffer_safe_lines(lines))
-  vim.api.nvim_buf_clear_namespace(state.branches_buf, namespace, 0, -1)
-  vim.api.nvim_set_option_value("modifiable", false, { buf = state.branches_buf })
-  vim.api.nvim_set_option_value("readonly", true, { buf = state.branches_buf })
-
-  for _, mark in ipairs(marks) do
-    vim.api.nvim_buf_add_highlight(state.branches_buf, namespace, mark.group, mark.row, mark.start_col, mark.end_col)
-  end
-
-  if state.branches_win and vim.api.nvim_win_is_valid(state.branches_win) and #state.branches > 0 then
-    state.branch_index = math.max(1, math.min(state.branch_index, #state.branches))
-    pcall(vim.api.nvim_win_set_cursor, state.branches_win, { state.branch_index, 0 })
-  end
-end
-
-refresh_branches = function()
-  state.branches = load_branches()
-  render_branches()
-end
-
--- Fetch quietly in the background so behind/ahead counts reflect the real
--- remote state (what's available to pull) without blocking the UI.
-local function fetch_remote()
-  local remotes = git({ "remote" }, { allowed_codes = { 0, 128 } })
-  if not remotes or vim.trim(remotes) == "" then
-    return
-  end
-  git_async({ "fetch", "--quiet", "--prune" }, function()
-    refresh_branches()
-  end)
 end
 
 local function binary_file_placeholder(path)
@@ -1934,15 +1361,12 @@ local function render_file(change_position)
       vim.cmd("normal! gg")
     end
   end)
-  render_sidebar()
 end
 
 refresh_everything = function(keep_path)
-  cancel_sidebar_preview_timer()
   state.diff_cache = {}
   local files = changed_files() or {}
   state.files = files
-  build_tree_entries()
 
   if #files == 0 then
     state.index = 1
@@ -1952,7 +1376,6 @@ refresh_everything = function(keep_path)
     if state.diff_buf and vim.api.nvim_buf_is_valid(state.diff_buf) then
       set_readonly_buffer(state.diff_buf, { "No changes" }, "gitdiff://empty", "")
     end
-    render_sidebar()
   else
     state.index = 1
     for index, file in ipairs(files) do
@@ -1964,14 +1387,12 @@ refresh_everything = function(keep_path)
     render_file()
   end
 
-  refresh_branches()
 end
 
 function M.select_file(index, change_position)
   if #state.files == 0 then
     return
   end
-  cancel_sidebar_preview_timer()
   state.index = math.max(1, math.min(index, #state.files))
   render_file(change_position)
 end
@@ -1984,226 +1405,9 @@ function M.previous_file(change_position)
   M.select_file(state.index - 1, change_position)
 end
 
-local function select_tree_row(row)
-  local entry = state.tree_entries[row]
-  if entry and entry.kind == "file" then
-    cancel_sidebar_preview_timer()
-    M.select_file(entry.file_index)
-    if state.diff_win and vim.api.nvim_win_is_valid(state.diff_win) then
-      vim.api.nvim_set_current_win(state.diff_win)
-    end
-  end
-end
-
-local function preview_sidebar_file(index)
-  if not index or index == state.index then
-    return
-  end
-
-  cancel_sidebar_preview_timer()
-  state.sidebar_pending_file_index = index
-  local uv = vim.uv or vim.loop
-  state.sidebar_preview_timer = uv.new_timer()
-  state.sidebar_preview_timer:start(80, 0, function()
-    local pending = state.sidebar_pending_file_index
-    cancel_sidebar_preview_timer()
-    vim.schedule(function()
-      if pending
-          and state.sidebar_win
-          and vim.api.nvim_win_is_valid(state.sidebar_win)
-          and state.diff_win
-          and vim.api.nvim_win_is_valid(state.diff_win)
-          and state.files[pending] then
-        M.select_file(pending)
-        if state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-          vim.api.nvim_set_current_win(state.sidebar_win)
-        end
-      end
-    end)
-  end)
-end
-
-local function move_tree_cursor(delta)
-  if not state.sidebar_win or not vim.api.nvim_win_is_valid(state.sidebar_win) or #state.tree_entries == 0 then
-    return
-  end
-
-  local row = vim.api.nvim_win_get_cursor(state.sidebar_win)[1]
-  row = math.max(1, math.min(row + delta, #state.tree_entries))
-  local entry = state.tree_entries[row]
-
-  if entry and entry.kind == "file" then
-    preview_sidebar_file(entry.file_index)
-  end
-  if state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-    vim.api.nvim_set_current_win(state.sidebar_win)
-    vim.api.nvim_win_set_cursor(state.sidebar_win, { row, 0 })
-  end
-end
-
-local function configure_sidebar()
-  set_readonly_buffer(state.sidebar_buf, {}, "gitdiff://files", "gitdiffview")
-  vim.wo[state.sidebar_win].number = false
-  vim.wo[state.sidebar_win].relativenumber = false
-  vim.wo[state.sidebar_win].wrap = false
-  vim.wo[state.sidebar_win].cursorline = true
-  vim.wo[state.sidebar_win].signcolumn = "no"
-  vim.wo[state.sidebar_win].foldcolumn = "0"
-  vim.wo[state.sidebar_win].winfixwidth = true
-  vim.wo[state.sidebar_win].winbar = " Changed files "
-
-  local opts = { buffer = state.sidebar_buf, silent = true }
-  vim.keymap.set("n", "q", close, vim.tbl_extend("force", opts, { desc = "Close git diff view" }))
-  vim.keymap.set("n", "j", function() move_tree_cursor(vim.v.count1) end, vim.tbl_extend("force", opts, { desc = "Move down in file tree" }))
-  vim.keymap.set("n", "k", function() move_tree_cursor(-vim.v.count1) end, vim.tbl_extend("force", opts, { desc = "Move up in file tree" }))
-  vim.keymap.set("n", "l", function()
-    if state.diff_win and vim.api.nvim_win_is_valid(state.diff_win) then
-      vim.api.nvim_set_current_win(state.diff_win)
-    end
-  end, vim.tbl_extend("force", opts, { desc = "Go to diff" }))
-  vim.keymap.set("n", "<CR>", function()
-    select_tree_row(vim.api.nvim_win_get_cursor(state.sidebar_win)[1])
-  end, vim.tbl_extend("force", opts, { desc = "Select changed file" }))
-  vim.keymap.set("n", "d", function()
-    local entry = state.tree_entries[vim.api.nvim_win_get_cursor(state.sidebar_win)[1]]
-    if entry and entry.kind == "file" then
-      M.discard_file(entry.file_index)
-    elseif entry and entry.kind == "dir" then
-      M.discard_folder(entry.path)
-    else
-      vim.notify("Git diff view: select a file or folder to discard", vim.log.levels.WARN)
-    end
-  end, vim.tbl_extend("force", opts, { desc = "Discard selected file or folder changes" }))
-  vim.keymap.set("n", "<Space>", function()
-    local entry = state.tree_entries[vim.api.nvim_win_get_cursor(state.sidebar_win)[1]]
-    if entry and entry.kind == "file" then
-      M.toggle_file_stage(entry.file_index)
-    elseif entry and entry.kind == "dir" then
-      M.toggle_folder_stage(entry.path)
-    else
-      vim.notify("Git diff view: select a file or folder to stage", vim.log.levels.WARN)
-    end
-  end, vim.tbl_extend("force", opts, { desc = "Stage/unstage selected file or folder" }))
-  vim.keymap.set("n", "a", M.stage_all, vim.tbl_extend("force", opts, { desc = "Stage/unstage all changes" }))
-  vim.keymap.set("n", "p", M.pull, vim.tbl_extend("force", opts, { desc = "Pull" }))
-  vim.keymap.set("n", "P", M.push, vim.tbl_extend("force", opts, { desc = "Push" }))
-  vim.keymap.set("n", "R", M.refresh, vim.tbl_extend("force", opts, { desc = "Refresh git diff view" }))
-  vim.keymap.set("n", "L", M.open_lazygit, vim.tbl_extend("force", opts, { desc = "Open lazygit" }))
-  vim.keymap.set("n", "<Tab>", focus_branches, vim.tbl_extend("force", opts, { desc = "Focus local branches" }))
-  vim.keymap.set("n", "c", open_commit_prompt, vim.tbl_extend("force", opts, { desc = "Commit changes" }))
-  vim.keymap.set("n", "e", edit_current_file, vim.tbl_extend("force", opts, { desc = "Edit selected file and close git diff view" }))
-end
-
-local function move_branch_cursor(delta)
-  if not state.branches_win or not vim.api.nvim_win_is_valid(state.branches_win) or #state.branches == 0 then
-    return
-  end
-  local row = vim.api.nvim_win_get_cursor(state.branches_win)[1]
-  row = math.max(1, math.min(row + delta, #state.branches))
-  state.branch_index = row
-  vim.api.nvim_win_set_cursor(state.branches_win, { row, 0 })
-end
-
-local function focus_sidebar()
-  if state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-    vim.api.nvim_set_current_win(state.sidebar_win)
-  end
-end
-
-local function configure_branches()
-  set_readonly_buffer(state.branches_buf, {}, "gitdiff://branches", "gitdiffview")
-  vim.wo[state.branches_win].number = false
-  vim.wo[state.branches_win].relativenumber = false
-  vim.wo[state.branches_win].wrap = false
-  vim.wo[state.branches_win].cursorline = true
-  vim.wo[state.branches_win].signcolumn = "no"
-  vim.wo[state.branches_win].foldcolumn = "0"
-  vim.wo[state.branches_win].winfixheight = true
-  vim.wo[state.branches_win].winbar = " Local branches "
-
-  local opts = { buffer = state.branches_buf, silent = true }
-  vim.keymap.set("n", "q", close, vim.tbl_extend("force", opts, { desc = "Close git diff view" }))
-  vim.keymap.set("n", "j", function() move_branch_cursor(vim.v.count1) end, vim.tbl_extend("force", opts, { desc = "Move down in branches" }))
-  vim.keymap.set("n", "k", function() move_branch_cursor(-vim.v.count1) end, vim.tbl_extend("force", opts, { desc = "Move up in branches" }))
-  vim.keymap.set("n", "<CR>", function()
-    local branch = state.branches[vim.api.nvim_win_get_cursor(state.branches_win)[1]]
-    if branch then
-      checkout_branch(branch.name)
-    end
-  end, vim.tbl_extend("force", opts, { desc = "Checkout branch" }))
-  vim.keymap.set("n", "p", M.pull, vim.tbl_extend("force", opts, { desc = "Pull" }))
-  vim.keymap.set("n", "P", M.push, vim.tbl_extend("force", opts, { desc = "Push" }))
-  vim.keymap.set("n", "R", M.refresh, vim.tbl_extend("force", opts, { desc = "Refresh git diff view" }))
-  vim.keymap.set("n", "L", M.open_lazygit, vim.tbl_extend("force", opts, { desc = "Open lazygit" }))
-  vim.keymap.set("n", "<Tab>", focus_sidebar, vim.tbl_extend("force", opts, { desc = "Focus changed files" }))
-  vim.keymap.set("n", "<Esc>", focus_sidebar, vim.tbl_extend("force", opts, { desc = "Focus changed files" }))
-end
-
-show_branches = function()
-  if not state.branches_buf or not vim.api.nvim_buf_is_valid(state.branches_buf) then
-    return
-  end
-
-  state.branches = load_branches()
-  state.branch_index = current_branch_row()
-
-  if not (state.branches_win and vim.api.nvim_win_is_valid(state.branches_win)) then
-    if not (state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win)) then
-      return
-    end
-    vim.api.nvim_set_current_win(state.sidebar_win)
-    vim.cmd("belowright new")
-    state.branches_win = vim.api.nvim_get_current_win()
-    local placeholder_buf = vim.api.nvim_win_get_buf(state.branches_win)
-    vim.api.nvim_win_set_buf(state.branches_win, state.branches_buf)
-    if vim.api.nvim_buf_is_valid(placeholder_buf)
-        and vim.api.nvim_buf_get_name(placeholder_buf) == ""
-        and not vim.bo[placeholder_buf].modified then
-      pcall(vim.api.nvim_buf_delete, placeholder_buf, { force = true })
-    end
-    configure_branches()
-    local height = math.max(4, math.min(#state.branches + 1, 14))
-    pcall(vim.api.nvim_win_set_height, state.branches_win, height)
-  end
-
-  render_branches()
-end
-
-show_sidebar = function(focus)
-  if not state.sidebar_buf or not vim.api.nvim_buf_is_valid(state.sidebar_buf) then
-    return
-  end
-
-  local previous_win = vim.api.nvim_get_current_win()
-  if state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-    resize_sidebar()
-  else
-    vim.cmd("topleft vnew")
-    state.sidebar_win = vim.api.nvim_get_current_win()
-    local placeholder_buf = vim.api.nvim_win_get_buf(state.sidebar_win)
-    vim.api.nvim_win_set_buf(state.sidebar_win, state.sidebar_buf)
-    if vim.api.nvim_buf_is_valid(placeholder_buf)
-        and vim.api.nvim_buf_get_name(placeholder_buf) == ""
-        and not vim.bo[placeholder_buf].modified then
-      pcall(vim.api.nvim_buf_delete, placeholder_buf, { force = true })
-    end
-    configure_sidebar()
-    resize_sidebar()
-  end
-
-  render_sidebar()
-  if focus and state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win) then
-    vim.api.nvim_set_current_win(state.sidebar_win)
-  elseif previous_win and vim.api.nvim_win_is_valid(previous_win) then
-    vim.api.nvim_set_current_win(previous_win)
-  end
-end
-
 local function open_layout()
   vim.cmd("tabnew")
   state.tabpage = vim.api.nvim_get_current_tabpage()
-  state.sidebar_buf = vim.api.nvim_create_buf(false, true)
-  state.branches_buf = vim.api.nvim_create_buf(false, true)
   state.diff_buf = vim.api.nvim_create_buf(false, true)
 
   state.diff_win = vim.api.nvim_get_current_win()
@@ -2216,19 +1420,11 @@ local function open_layout()
   end
 
   configure_diff_keymaps(state.diff_buf)
-  if state.single_file then
-    vim.api.nvim_set_current_win(state.diff_win)
-  else
-    show_sidebar(true)
-    show_branches()
-    focus_sidebar()
-  end
+  vim.api.nvim_set_current_win(state.diff_win)
 end
 
--- opts.allow_empty keeps the view open with a "No changes" placeholder instead
--- of bailing out when the working tree is clean (used by standalone lazydiff).
--- Note: invoked as a user command, opts is the command table, which has no
--- allow_empty field -- so :GitDiffView keeps its bail-on-empty behavior.
+-- opts.allow_empty keeps the viewer open with a "No changes" placeholder.
+-- opts.focus_file selects the repo-relative file requested by LazyGit.
 function M.open(opts)
   opts = opts or {}
   close()
@@ -2251,18 +1447,11 @@ function M.open(opts)
   end
 
   state.files = files
-  build_tree_entries()
   state.index = 1
-  -- opts.focus_file: repo-relative path to select on open (used by the
-  -- lazydiff wrapper when invoked from lazygit on a specific file).
-  -- opts.single_file: with a matched focus_file, show only that file's diff
-  -- full-width -- no file tree or branches panel.
-  state.single_file = false
   if type(opts.focus_file) == "string" and opts.focus_file ~= "" then
     for index, file in ipairs(files) do
       if file.path == opts.focus_file then
         state.index = index
-        state.single_file = opts.single_file == true
         break
       end
     end
@@ -2276,11 +1465,9 @@ function M.open(opts)
     if state.diff_buf and vim.api.nvim_buf_is_valid(state.diff_buf) then
       set_readonly_buffer(state.diff_buf, { "No changes" }, "gitdiff://empty", "")
     end
-    render_sidebar()
   else
     render_file()
   end
-  fetch_remote()
 end
 
 vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter", "WinScrolled" }, {

@@ -56,8 +56,7 @@ local function setup_ui()
 end
 
 -- opts.focus_file: repo-relative path to open on (set via LAZYDIFF_FILE by the
--- wrapper / lazygit keybinding). When set, the viewer shows only that file's
--- diff full-width (no file tree or branches).
+-- wrapper / lazygit keybinding).
 function M.launch(opts)
   opts = opts or {}
   vim.g.lazydiff_standalone = true
@@ -72,7 +71,7 @@ function M.launch(opts)
     if focus_file == "" then
       focus_file = nil
     end
-    gdv.open({ allow_empty = true, focus_file = focus_file, single_file = focus_file ~= nil })
+    gdv.open({ allow_empty = true, focus_file = focus_file })
 
     -- No tab was opened -> not a repo. Exit immediately.
     if #vim.api.nvim_list_tabpages() <= tabs_before then
