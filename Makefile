@@ -5,13 +5,13 @@ ARCH ?= x86_64
 NVIM_VERSION ?= v0.12.4
 DIST_DIR := dist
 DOWNLOAD_DIR := .cache
-NAME := nvim-portable-linux-$(ARCH)
+NAME := nvim
 OUTPUT := $(DIST_DIR)/$(NAME)
 NVIM_ARCHIVE := $(DOWNLOAD_DIR)/nvim-linux-$(ARCH)-$(NVIM_VERSION).tar.gz
 NVIM_URL := https://github.com/neovim/neovim/releases/download/$(NVIM_VERSION)/nvim-linux-$(ARCH).tar.gz
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
-INSTALL_NAME ?= nvim-portable
+INSTALL_NAME ?= nvim
 VSCODE_THEME_DIR ?= $(HOME)/.local/share/nvim/lazy/vscode-theme
 
 .PHONY: all help build update install clean
@@ -23,7 +23,7 @@ help:
 	  'Available commands:' \
 	  '  make build    Build the portable executable in dist/' \
 	  '  make update   Refresh the cached official Neovim download' \
-	  '  make install  Build and install it as ~/.local/bin/nvim-portable' \
+	  '  make install  Build and install it as ~/.local/bin/nvim' \
 	  '  make clean    Remove generated files; keep the Neovim download'
 
 $(NVIM_ARCHIVE):
@@ -89,7 +89,8 @@ build: $(NVIM_ARCHIVE)
 install: build
 	install -d "$(BINDIR)"
 	install -m 755 "$(OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
-	@echo "Installed $(BINDIR)/$(INSTALL_NAME)"
+	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
+	$(MAKE) clean
 
 clean:
 	rm -rf "$(DIST_DIR)"
