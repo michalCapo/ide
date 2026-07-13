@@ -1,0 +1,122 @@
+" vim: filetype=vifm :
+" Noct — a soft, cohesive dark colorscheme for vifm.
+" Uses explicit dark surfaces so contrast doesn't depend on the terminal's
+" current theme. Blue marks the active pane; gray marks the inactive pane.
+
+highlight clear
+
+" --- windows / borders ---
+" Both panes stay readable (the :view preview renders in the inactive pane,
+" so dimming OtherWin would make preview + inactive files unreadable).
+" Active vs inactive is carried by the cursor bar, the pane header, and the
+" vertical border — not by dimming text.
+hi Win          cterm=none      ctermfg=255     ctermbg=235
+hi OtherWin     cterm=none      ctermfg=252     ctermbg=232
+hi AuxWin       cterm=none      ctermfg=250     ctermbg=234
+hi OddLine      cterm=none      ctermfg=default ctermbg=default
+hi Border       cterm=bold      ctermfg=31      ctermbg=232
+
+" --- top / tab / status lines (soft gray bars, not white) ---
+hi TopLine      cterm=none      ctermfg=250     ctermbg=234
+hi TopLineSel   cterm=bold      ctermfg=255     ctermbg=24
+hi TabLine      cterm=none      ctermfg=250     ctermbg=234
+hi TabLineSel   cterm=bold      ctermfg=255     ctermbg=24
+hi JobLine      cterm=bold      ctermfg=255     ctermbg=238
+hi StatusLine   cterm=none      ctermfg=250     ctermbg=236
+
+" --- cursor / selection ---
+" Active pane: solid bar on the cursor line (the one prominent signal).
+" Inactive pane: NO background bar — its cursor file is marked only by
+" brighter text, so the active bar never has a competitor.
+hi CurrLine     cterm=bold      ctermfg=255     ctermbg=24
+hi OtherLine    cterm=none      ctermfg=250     ctermbg=236
+hi LineNr       cterm=none      ctermfg=default ctermbg=default
+hi Selected     cterm=bold      ctermfg=214     ctermbg=default
+hi CmpMismatch  cterm=bold      ctermfg=white   ctermbg=88
+hi CmpUnmatched cterm=bold      ctermfg=white   ctermbg=28
+hi CmpBlank     cterm=none      ctermfg=default ctermbg=default
+
+" --- menus / suggestions / command line ---
+" Wildmenu (popup completion, e.g. `:e /home/` Tab). WildBox was unset and
+" fell back to a dim 250-on-236 (~3.3:1, hard to read); define it explicitly
+" so the popup surface clears the 4.5:1 contrast bar.
+" Key-suggestion popup. Never use `reverse` here: it turns terminal cyan
+" (#006a6a in Alacritty) into a low-contrast full-popup background.
+hi SuggestBox  cterm=bold      ctermfg=255     ctermbg=235
+hi WildBox     cterm=none      ctermfg=255     ctermbg=235
+hi WildMenu    cterm=bold      ctermfg=16      ctermbg=221
+hi CmdLine     cterm=none      ctermfg=255     ctermbg=232
+hi ErrorMsg    cterm=bold      ctermfg=white   ctermbg=red
+
+" --- file types (muted, readable) ---
+hi Directory    cterm=bold      ctermfg=110     ctermbg=default
+hi Executable   cterm=bold      ctermfg=108     ctermbg=default
+hi Socket       cterm=bold      ctermfg=109     ctermbg=default
+hi Device       cterm=bold      ctermfg=168     ctermbg=default
+hi Fifo         cterm=none      ctermfg=109     ctermbg=default
+hi Link         cterm=none      ctermfg=146     ctermbg=default
+hi BrokenLink   cterm=bold      ctermfg=174     ctermbg=default
+hi HardLink     cterm=none      ctermfg=143     ctermbg=default
+
+" powerline-like user highlights (soft)
+hi User1 cterm=none ctermbg=236 ctermfg=250
+hi User2 cterm=bold ctermbg=238 ctermfg=255
+hi User3 cterm=none ctermbg=236 ctermfg=245
+hi User4 cterm=none ctermbg=238 ctermfg=250
+
+" --- per-extension accents (muted, cohesive) ---
+" build system files
+highlight {Makefile,Makefile.am,Makefile.in,Makefile.win,*.mak,*.mk,*.m4,*.ac,
+          \configure,CMakeLists.txt,*.cmake,*.pro,*.pri,*.sln,meson.build,
+          \meson_options.txt}
+        \ cterm=none ctermfg=109 ctermbg=default
+" archives
+highlight {*.7z,*.ace,*.arj,*.bz2,*.cpio,*.deb,*.dz,*.gz,*.jar,*.lzh,*.lzma,
+          \*.rar,*.rpm,*.rz,*.tar,*.taz,*.tb2,*.tbz,*.tbz2,*.tgz,*.tlz,*.trz,
+          \*.txz,*.tz,*.tz2,*.tzst,*.xz,*.z,*.zip,*.zoo,*.apk,*.gzip,*.lz,
+          \*.zstd}
+        \ cterm=none ctermfg=173 ctermbg=default
+" config / text formats
+highlight {*.css,*.less,*.scss,*.markdown,*.md,*.mkd,*.org,*.pandoc,*.pdc,*.tex,
+          \*.txt,*.xml,*.log,*.rss,*.xul,*.json,*.yaml,*.yml,*.csv,*.plist,
+          \*.ini,*.cfg,*.rc,*.conf,*.spec,*.qrc,*.description,*.list,*.log.old,
+          \*.log.1,*.log.2,*.log.3,*.log.4,*.log.5,*.log.6,*.log.7,*.log.8,
+          \syslog,syslog.1,*.xsd,*.toml,*.rst}
+        \ cterm=none ctermfg=188 ctermbg=default
+" man-page style numbered files
+highlight {*[^0-9].[1-9]}
+        \ cterm=none ctermfg=188 ctermbg=default
+" documents
+highlight {*.doc,*.docx,*.xls,*.xlsm,*.xlsx,*.mobi,*.rtf,*.ppt,*.pptx,*.pdf,
+          \*.epub,*.fb2,*.djvu,*.djv,*.htm,*.html,*.shtml,*.xhtml,*.desktop,
+          \*.odg,*.odt,*.ods}
+        \ cterm=none ctermfg=182 ctermbg=default
+" audio
+highlight {*.aac,*.ac3,*.anx,*.ape,*.asf,*.au,*.axa,*.cue,*.flac,*.m2a,*.m4a,
+          \*.mid,*.midi,*.mka,*.mp3,*.mpc,*.mpga,*.oga,*.ogg,*.ogx,*.ra,*.ram,
+          \*.spx,*.wav,*.wma}
+        \ cterm=none ctermfg=109 ctermbg=default
+" video / multimedia
+highlight {*.avi,*.axv,*.divx,*.flv,*.m2v,*.m4v,*.mp4,*.m4p,*.mp4v,*.mpeg,*.mpg,
+          \*.mkv,*.mov,*.nuv,*.ogv,*.qt,*.rm,*.ts,*.vob,*.webm,*.wmv,*.xvid,
+          \*.unknown_video}
+        \ cterm=none ctermfg=108 ctermbg=default
+" images
+highlight {*.bmp,*.gif,*.jpeg,*.jpg,*.ico,*.png,*.ppm,*.svg,*.svgz,*.tga,*.tif,
+          \*.tiff,*.xbm,*.xcf,*.xpm,*.xspf,*.xwd,*.ai,*.pbm,*.pgm,*.webp}
+        \ cterm=none ctermfg=110 ctermbg=default
+" executables / scripts
+highlight {*.sh,*.bash,*.zsh,*.bat,*.btm,*.cmd,*.com,*.dll,*.exe,*.run,*.msu,
+          \*.msi,*.fish,*.AppImage}
+        \ cterm=none ctermfg=108 ctermbg=default
+" source code
+highlight {*.patch,*.diff,*.py,*.cpp,*.hpp,*.c,*.h,*.cpp,*.hpp,*.cc,*.hh,*.ld,
+          \*.hs,*.php,*.lua,*.vim,*.vifm,*.asm,*.s,*.java,*.cxx,*.c++,*.go,
+          \*.pl,*.pm,*.t,*.cs,*.asp,*.dart,*.js,*.rb,*.scala,*.ts,*.coffee,
+          \*.ml,*.mli,*.rs,*.sql,*.qml,vifmrc,vimrc,.vimrc,*.flex,*.ypp,*.S,
+          \*.robot}
+        \ cterm=none ctermfg=151 ctermbg=default
+" software documentation
+highlight {COPYRIGHT,COPYING*,BUGS,ChangeLog*,FAQ,INSTALL*,LICENCE,LICENSE,NEWS,
+          \README,README.*,AUTHORS,TODO,THANKS}
+        \ cterm=none ctermfg=187 ctermbg=default

@@ -1,0 +1,11 @@
+# Overrides layered after config.yml when the desktop/Neovim theme is light.
+# Keep config.yml dark-only so the dark theme stays unchanged.
+gui:
+  theme:
+    lightTheme: true
+    selectedLineBgColor:
+      - '#e6edf7'
+    selectedRangeBgColor:
+      - '#fff2bf'
+    inactiveViewSelectedLineBgColor:
+      - '#edf0f3'

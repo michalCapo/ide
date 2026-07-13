@@ -1,0 +1,69 @@
+gui:
+  # Number of lines to scroll in the main/staging view with Ctrl-u/Ctrl-d, J/K, PgUp/PgDown.
+  # Lazygit does not support dynamic half-page scrolling, so use a fixed value.
+  scrollHeight: 20
+  theme:
+    lightTheme: false
+    # Dark theme selection: keep the selected row dark so red/green/gray
+    # Lazygit text remains readable on a dark terminal background.
+    # Light theme overrides live beside this file and are layered by the
+    # portable launcher.
+    selectedLineBgColor:
+      - '#2a3441'
+    selectedRangeBgColor:
+      - '#3a2f1d'
+    inactiveViewSelectedLineBgColor:
+      - '#242a32'
+  wrapLinesInStagingView: false
+  wrapLinesInCommitMessage: false
+  # Start Lazygit in the default multi-panel layout.
+  # Toggle/cycle inside Lazygit with `+` / `_` (or `-`) if needed.
+  screenMode: normal
+
+# Return straight to lazygit after a subprocess (e.g. lazydiff) exits,
+# skipping the "press enter to return to lazygit" screen. (Top-level key,
+# not under gui.)
+promptToReturnFromSubprocess: false
+
+# Reuse the parent Neovim when Lazygit is running in one of its terminals.
+# The helper asks the parent to close Lazygit before opening the selected file;
+# when Lazygit is standalone it falls back to launching Neovim normally.
+os:
+  edit: '"$LAZYGIT_NVIM_EDIT_HELPER" {{filename}}'
+  editAtLine: '"$LAZYGIT_NVIM_EDIT_HELPER" {{filename}} {{line}}'
+  editAtLineAndWait: '"$LAZYGIT_NVIM_EDIT_HELPER" {{filename}} {{line}}'
+  editInTerminal: true
+
+keybinding:
+  universal:
+    # Alias plain '-' to Shift+'-' ('_') for cycling screen modes backwards.
+    prevScreenMode: ['_', '-']
+  # Free '-' from view-specific defaults so the universal alias works there too.
+  files:
+    collapseAll: <disabled>
+  branches:
+    checkoutPreviousBranch: <disabled>
+
+customCommands:
+  # Review changes in the Neovim diff viewer (lazydiff) instead of lazygit's
+  # built-in diff panels. Enter on a file opens just that file's diff
+  # full-width (q/Esc returns to lazygit); `V` opens the full viewer with the
+  # file tree and branches.
+  # On a directory .SelectedFile is nil (custom commands can't fall through to
+  # the built-in collapse/expand), so run a no-op instead of erroring.
+  - key: '<enter>'
+    context: 'files'
+    description: 'Review file in lazydiff'
+    command: '{{if .SelectedFile}}lazydiff {{.SelectedFile.Name | quote}}{{else}}true{{end}}'
+    output: terminal
+  - key: 'V'
+    context: 'global'
+    description: 'Review changes in lazydiff'
+    command: 'lazydiff'
+    output: terminal
+
+git:
+  # Show the whole file around changes instead of only a few changed hunks.
+  # Lazygit passes this as git diff --unified=<n>; use a very large value.
+  # You can still adjust temporarily inside Lazygit with `{` / `}`.
+  diffContextSize: 999999

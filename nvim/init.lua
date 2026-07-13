@@ -1779,7 +1779,8 @@ vim.keymap.set({ "n", "t" }, "<Esc>3", _G.nvim_focus_dap_terminal, { desc = "Foc
 vim.keymap.set({ "n", "t" }, "<leader>dT", _G.nvim_focus_dap_terminal, { desc = "Focus DAP terminal", silent = true })
 
 function _G.open_lazygit()
-  if vim.fn.executable("lazygit") ~= 1 then
+  local lazygit = vim.env.NVIM_PORTABLE_LAZYGIT or "lazygit"
+  if vim.fn.executable(lazygit) ~= 1 then
     vim.notify("lazygit is not installed or not on PATH", vim.log.levels.ERROR)
     return
   end
@@ -1818,7 +1819,7 @@ function _G.open_lazygit()
     desc = "Resize fullscreen lazygit float",
   })
 
-  local job_id = vim.fn.termopen("lazygit", {
+  local job_id = vim.fn.termopen({ lazygit }, {
     cwd = vim.fn.getcwd(),
     env = {
       LAZYGIT_NVIM_EDIT_REQUEST = edit_request,

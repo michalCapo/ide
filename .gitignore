@@ -4,8 +4,7 @@
 # Cached official Neovim download
 /.cache/
 
-# Local binary and editor temporary files
-/nvim
+# Editor temporary files
 *.swp
 *.swo
 *~

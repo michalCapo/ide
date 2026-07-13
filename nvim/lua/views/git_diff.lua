@@ -637,7 +637,10 @@ local function edit_current_file()
   -- inside the original Neovim -> Lazygit terminal.
   local parent_edit_request = vim.env.LAZYGIT_NVIM_EDIT_REQUEST
   if vim.g.lazydiff_standalone and parent_edit_request and parent_edit_request ~= "" then
-    local helper = vim.fn.expand("~/.config/lazygit/nvim-edit-parent")
+    local helper = vim.env.LAZYGIT_NVIM_EDIT_HELPER
+    if not helper or helper == "" then
+      helper = vim.fn.expand("~/.config/lazygit/nvim-edit-parent")
+    end
     local output = vim.fn.system({ helper, full_path, tostring(row) })
     if vim.v.shell_error ~= 0 then
       local message = vim.trim(output or "")
@@ -754,7 +757,8 @@ end
 -- terminal tab in the same window; on exit we return to the diff view and
 -- refresh, since lazygit may have changed the repo state.
 function M.open_lazygit()
-  if vim.fn.executable("lazygit") ~= 1 then
+  local lazygit = vim.env.NVIM_PORTABLE_LAZYGIT or "lazygit"
+  if vim.fn.executable(lazygit) ~= 1 then
     vim.notify("Git diff view: lazygit is not installed", vim.log.levels.ERROR)
     return
   end
@@ -766,7 +770,7 @@ function M.open_lazygit()
   local lazygit_tab = vim.api.nvim_get_current_tabpage()
   local term_buf = vim.api.nvim_get_current_buf()
 
-  vim.fn.jobstart({ "lazygit" }, {
+  vim.fn.jobstart({ lazygit }, {
     cwd = root,
     term = true,
     on_exit = function()

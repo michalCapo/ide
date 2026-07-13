@@ -1,61 +1,95 @@
-# nvim
+# Portable terminal tools
 
-Personal Neovim configuration packaged as a portable Linux executable. The
-build bundles Neovim, this Lua configuration, the VS Code theme, and nvim-dap into a
-self-extracting launcher. It also creates a `lazydiff` companion command.
+Personal Neovim, Lazygit, and Vifm configuration packaged as portable Linux
+commands. The build bundles each upstream executable with its configuration and
+also creates the `lazydiff` companion command.
+
+## Included commands
+
+| Command | x86_64 | arm64 |
+| --- | --- | --- |
+| `nvim` | yes | yes |
+| `lazydiff` | yes | yes |
+| `lazygit` | yes | yes |
+| `vifm` | yes | no |
+
+Vifm is omitted on ARM64 because upstream does not publish an ARM64 Linux
+binary. Existing `~/.config/lazygit` and `~/.config/vifm` directories are not
+changed. The launchers unpack their bundled configuration below
+`${XDG_CACHE_HOME:-~/.cache}`.
 
 ## Requirements
 
 - Linux (`x86_64` or `arm64`)
-- `make`, `curl`, `tar`, and `sha256sum`
+- `make`, `curl`, `tar`, `sha256sum`, and Bash
+- x86_64 host when building the Vifm package
 
-The VS Code theme and nvim-dap are included in this repository.
+The Neovim plugins, themes, Lazygit configuration, and Vifm configuration are
+included in this repository. Downloaded upstream binaries are checksum-verified
+and retained in `.cache/`.
 
 ## Build and install
 
-Install the latest release on Linux (`x86_64` or `arm64`):
+Install the latest release:
 
 ```sh
 curl -fsSL https://github.com/michalCapo/nvim/releases/latest/download/install.sh | sh
 ```
 
-This verifies the release checksum and installs `nvim` and `lazydiff` to
-`~/.local/bin`. Add that directory to `PATH` if needed.
+This verifies the release checksum and installs the commands supported by the
+current architecture into `~/.local/bin`. Add that directory to `PATH` if
+needed.
 
-To build and install from a checkout instead:
+To build and install from a checkout:
 
 ```sh
 make build
 make install
 ```
 
-`make build` writes `dist/nvim` and `dist/lazydiff`. `make install` installs
-both commands to `~/.local/bin` by default.
+`make build` writes commands to `dist/`. `make install` installs them to
+`~/.local/bin` by default.
 
 Build settings can be overridden on the command line:
 
 ```sh
-make build ARCH=arm64 NVIM_VERSION=v0.12.4
+make build ARCH=arm64 NVIM_VERSION=v0.12.4 LAZYGIT_VERSION=0.63.0
+make build VIFM_VERSION=0.14.4
 make install PREFIX=/custom/prefix
 ```
+
+Version overrides also require overriding the matching architecture-specific
+SHA-256 variable because release checksums are pinned in the Makefile.
 
 Other useful commands:
 
 ```sh
-make update  # refresh the cached Neovim download
-make clean   # remove generated files
+make update  # refresh cached downloads for ARCH
+make clean   # remove dist/ but keep cached downloads
 ```
 
-## Use as a regular config
+## Source layout
 
-Clone the repository to Neovim's config directory and start Neovim normally:
+- `nvim/` contains the Neovim configuration, bundled plugins, and launcher
+  templates.
+- `lazygit/` contains the Lazygit configuration and parent-editor helper.
+- `vifm/` contains the Vifm configuration, colors, and scripts.
+- The root `Makefile` builds all portable commands and release assets.
+
+Vifm runtime history (`vifminfo`) is intentionally not tracked. A clean state
+file is created in the extracted portable cache.
+
+## Use as a regular Neovim config
+
+Clone the repository and link its Neovim directory:
 
 ```sh
-git clone git@github.com:michalCapo/nvim.git ~/.config/nvim
+git clone git@github.com:michalCapo/nvim.git ~/code/nvim
+ln -s ~/code/nvim/nvim ~/.config/nvim
 nvim
 ```
 
 ## License
 
 This is a personal configuration. No license has been granted for reuse or
-redistribution.
+redistribution. Bundled upstream projects retain their own licenses.
