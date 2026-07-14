@@ -52,19 +52,12 @@ keybinding:
 customCommands:
   # Review changes in the Neovim diff viewer (lazydiff) instead of lazygit's
   # built-in diff panels. Enter on a file opens just that file's diff
-  # full-width (q/Esc returns to lazygit); `V` opens the full viewer with the
-  # file tree and branches.
-  # On a directory .SelectedFile is nil (custom commands can't fall through to
-  # the built-in collapse/expand), so run a no-op instead of erroring.
+  # full-width (q/Esc returns to lazygit).
+  # On a directory .SelectedFile is nil, so run a no-op instead of erroring.
   - key: '<enter>'
     context: 'files'
     description: 'Review file in lazydiff'
     command: '{{if .SelectedFile}}lazydiff {{.SelectedFile.Name | quote}}{{else}}true{{end}}'
-    output: terminal
-  - key: 'V'
-    context: 'global'
-    description: 'Review changes in lazydiff'
-    command: 'lazydiff'
     output: terminal
 
 git:
