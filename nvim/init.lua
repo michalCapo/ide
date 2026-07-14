@@ -2544,7 +2544,7 @@ _G.nvim_keymap_search_groups = {
     section = "Agent",
     items = {
       { "<leader>aa", "Agent: toggle chats (open at last active chat)" },
-      { "<leader>as", "Agent: set new-chat harness, model, and level" },
+      { "<leader>as", "Agent: manage saved presets" },
       { "<leader>at", "Implement todo at cursor (background prompt)" },
       { "<leader>ae", "Fix error at cursor (background prompt)" },
       { "<C-p>/<C-n>", "In chat: previous / next chat (Ctrl-n past last creates new)" },
@@ -5123,6 +5123,7 @@ local function searchable_ui_select(source_items, opts, on_choice)
     on_close = function()
       on_choice(nil, nil)
     end,
+    extra_keymaps = opts.extra_keymaps,
   }, function(entry)
     on_choice(entry.value, entry.original_index)
   end)
@@ -7594,8 +7595,8 @@ vim.keymap.set("n", "<leader>ya", function()
   require("agent").paste_location()
 end, { desc = "Agent: paste current location into active chat" })
 vim.keymap.set("n", "<leader>as", function()
-  require("agent").select_preset()
-end, { desc = "Agent: set new-chat preset" })
+  require("agent").manage_presets()
+end, { desc = "Agent: manage presets" })
 vim.keymap.set("n", "<leader>at", function()
   require("agent").implement_todo()
 end, { desc = "Agent: implement todo at cursor (background)" })

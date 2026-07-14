@@ -10,10 +10,7 @@ end
 
 M.defaults = {
   default_agent = "pi",
-  preset = {
-    model = nil,
-    level = nil,
-  },
+  presets = {},
   levels = {
     pi = { "off", "minimal", "low", "medium", "high", "xhigh", "max" },
     claude = { "low", "medium", "high", "xhigh", "max" },
@@ -87,9 +84,51 @@ M.defaults = {
 
 M.options = vim.deepcopy(M.defaults)
 
+local presets_path = vim.fn.stdpath("data") .. "/agent-presets.json"
+
+local function valid_preset(value)
+  return type(value) == "table"
+    and type(value.name) == "string" and vim.trim(value.name) ~= ""
+    and type(value.harness) == "string" and value.harness ~= ""
+    and (value.model == nil or type(value.model) == "string")
+    and (value.reasoning == nil or type(value.reasoning) == "string")
+end
+
+local function load_presets()
+  if vim.fn.filereadable(presets_path) ~= 1 then
+    return {}
+  end
+  local ok, decoded = pcall(vim.json.decode, table.concat(vim.fn.readfile(presets_path), "\n"))
+  if not ok or type(decoded) ~= "table" then
+    vim.schedule(function()
+      vim.notify("Could not read " .. presets_path, vim.log.levels.WARN, { title = "Agent presets" })
+    end)
+    return {}
+  end
+  local presets = {}
+  for _, preset in ipairs(decoded) do
+    if valid_preset(preset) then
+      presets[#presets + 1] = preset
+    end
+  end
+  return presets
+end
+
+local function save_presets()
+  vim.fn.mkdir(vim.fn.fnamemodify(presets_path, ":h"), "p")
+  local tmp = presets_path .. ".tmp"
+  local ok, encoded = pcall(vim.json.encode, M.options.presets or {})
+  if not ok or vim.fn.writefile({ encoded }, tmp) ~= 0 or vim.fn.rename(tmp, presets_path) ~= 0 then
+    pcall(vim.fn.delete, tmp)
+    return false, "Could not save " .. presets_path
+  end
+  return true
+end
+
 function M.setup(opts)
   opts = opts or {}
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts)
+  M.options.presets = load_presets()
   return M.options
 end
 
@@ -108,13 +147,45 @@ function M.set_default(name)
   return spec, name
 end
 
-function M.set_preset(name, model, level)
-  local spec, err = M.set_default(name)
-  if not spec then
+function M.presets_path()
+  return presets_path
+end
+
+function M.save_preset(preset, index)
+  if not valid_preset(preset) or not M.options.agents[preset.harness] then
+    return nil, "Invalid agent preset"
+  end
+  local copy = vim.deepcopy(preset)
+  local previous = index and M.options.presets[index] or nil
+  if index then
+    M.options.presets[index] = copy
+  else
+    M.options.presets[#M.options.presets + 1] = copy
+    index = #M.options.presets
+  end
+  local ok, err = save_presets()
+  if not ok then
+    if previous then
+      M.options.presets[index] = previous
+    else
+      table.remove(M.options.presets, index)
+    end
     return nil, err
   end
-  M.options.preset = { model = model, level = level }
-  return M.options.preset
+  return copy, index
+end
+
+function M.delete_preset(index)
+  if not M.options.presets[index] then
+    return nil, "Preset no longer exists"
+  end
+  local removed = table.remove(M.options.presets, index)
+  local ok, err = save_presets()
+  if not ok then
+    table.insert(M.options.presets, index, removed)
+    return nil, err
+  end
+  return removed
 end
 
 function M.names()

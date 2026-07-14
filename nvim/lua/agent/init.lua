@@ -38,8 +38,17 @@ end
 
 -- Run a prompt in a background chat: the chat joins the stack but no chat box
 -- is shown, the user only gets a notification that the prompt was sent.
-local function run_hidden_prompt(context, prompt, what)
-  local agent = require("agent.manager").start(context, prompt)
+local function preset_opts(preset)
+  return {
+    agent = preset.harness,
+    model = preset.model,
+    level = preset.reasoning,
+    preset_name = preset.name,
+  }
+end
+
+local function run_hidden_prompt(context, prompt, what, preset)
+  local agent = require("agent.manager").start(context, prompt, preset_opts(preset))
   if agent and agent.status ~= "error" then
     local label = require("agent.config").label(agent.agent_name)
     notify(what .. " prompt sent to " .. label .. " (chat #" .. agent.id .. ")")
@@ -48,11 +57,20 @@ local function run_hidden_prompt(context, prompt, what)
 end
 
 function M.toggle()
-  require("agent.ui").toggle(current_context())
+  local manager = require("agent.manager")
+  if manager.has_chats() then
+    require("agent.ui").toggle(current_context())
+    return
+  end
+  M.choose_preset("New chat preset", function(preset)
+    require("agent.ui").new_chat(current_context(), preset_opts(preset))
+  end)
 end
 
 function M.new_chat()
-  require("agent.ui").new_chat(current_context())
+  M.choose_preset("New chat preset", function(preset)
+    require("agent.ui").new_chat(current_context(), preset_opts(preset))
+  end)
 end
 
 function M.paste_location()
@@ -113,40 +131,164 @@ local function select_model(items, current, callback)
   end)
 end
 
-function M.select_preset()
-  local config = require("agent.config")
+local function harness_names(config)
   local harnesses = {}
   for _, name in ipairs({ "claude", "codex", "pi" }) do
     if config.options.agents[name] then
       harnesses[#harnesses + 1] = name
     end
   end
+  return harnesses
+end
 
-  vim.ui.select(harnesses, {
-    prompt = "Agent harness",
-    format_item = function(name)
-      return (name == config.options.default_agent and "● " or "  ") .. config.label(name)
-    end,
-  }, function(harness)
-    if not harness then return end
-    local preset = config.options.preset or {}
-    notify("Loading " .. config.label(harness) .. " models…")
-    config.discover_models(harness, function(models, err)
-      if err then
-        notify(err .. "; use Custom model if needed", vim.log.levels.WARN)
-      end
-      select_model(models, preset.model, function(model)
-        select_with_default(config.options.levels[harness], "Agent level", preset.level, function(level)
-          config.set_preset(harness, model, level)
-          local details = config.label(harness)
-            .. " · " .. (model or "default model")
-            .. " · " .. (level or "default level")
-          notify("New chat preset: " .. details)
+local function preset_details(config, preset)
+  return config.label(preset.harness)
+    .. " · " .. (preset.model or "default model")
+    .. " · " .. (preset.reasoning or "default reasoning")
+end
+
+local function preset_row(config, preset)
+  local name = preset.name or ""
+  local details = preset_details(config, preset)
+  local available = vim.api.nvim_win_get_width(0)
+  local picker_width = math.min(math.max(58, math.floor(available * 0.58)), math.max(24, available - 8))
+  local content_width = picker_width - 2
+  local gap = math.max(2, content_width - vim.fn.strdisplaywidth(name) - vim.fn.strdisplaywidth(details))
+  return name .. string.rep(" ", gap) .. details
+end
+
+local function sort_presets(config, items, get_preset)
+  table.sort(items, function(left, right)
+    local left_preset = get_preset(left)
+    local right_preset = get_preset(right)
+    local left_harness = config.label(left_preset.harness):lower()
+    local right_harness = config.label(right_preset.harness):lower()
+    if left_harness ~= right_harness then
+      return left_harness < right_harness
+    end
+    local left_name = (left_preset.name or ""):lower()
+    local right_name = (right_preset.name or ""):lower()
+    if left_name == right_name then
+      return (left_preset.name or "") < (right_preset.name or "")
+    end
+    return left_name < right_name
+  end)
+  return items
+end
+
+local function edit_preset(index, done)
+  local config = require("agent.config")
+  local existing = index and config.options.presets[index] or nil
+  vim.ui.input({ prompt = "Preset name: ", default = existing and existing.name or "" }, function(name)
+    name = name and vim.trim(name) or ""
+    if name == "" then return end
+    vim.ui.select(harness_names(config), {
+      prompt = "Harness",
+      format_item = function(harness)
+        return ((existing and harness == existing.harness) and "● " or "  ") .. config.label(harness)
+      end,
+    }, function(harness)
+      if not harness then return end
+      notify("Loading " .. config.label(harness) .. " models…")
+      config.discover_models(harness, function(models, err)
+        if err then
+          notify(err .. "; use Custom model if needed", vim.log.levels.WARN)
+        end
+        local current_model = existing and existing.harness == harness and existing.model or nil
+        select_model(models, current_model, function(model)
+          local current_reasoning = existing and existing.harness == harness and existing.reasoning or nil
+          select_with_default(config.options.levels[harness], "Reasoning", current_reasoning, function(reasoning)
+            local preset, save_err = config.save_preset({
+              name = name,
+              harness = harness,
+              model = model,
+              reasoning = reasoning,
+            }, index)
+            if not preset then
+              notify(save_err, vim.log.levels.ERROR)
+              return
+            end
+            notify((existing and "Updated " or "Saved ") .. preset.name .. ": " .. preset_details(config, preset))
+            if done then done(preset) end
+          end)
         end)
       end)
     end)
   end)
 end
+
+function M.choose_preset(prompt, callback)
+  local config = require("agent.config")
+  local presets = sort_presets(config, vim.deepcopy(config.options.presets or {}), function(preset)
+    return preset
+  end)
+  if #presets == 0 then
+    notify("Create your first agent preset")
+    edit_preset(nil, callback)
+    return
+  end
+  vim.ui.select(presets, {
+    prompt = prompt or "Agent preset",
+    format_item = function(preset)
+      return preset_row(config, preset)
+    end,
+  }, function(preset)
+    if preset then callback(vim.deepcopy(preset)) end
+  end)
+end
+
+function M.manage_presets()
+  local config = require("agent.config")
+  local presets = config.options.presets or {}
+  local choices = {}
+  for index, preset in ipairs(presets) do
+    choices[#choices + 1] = { index = index, preset = preset }
+  end
+  sort_presets(config, choices, function(item) return item.preset end)
+  choices[#choices + 1] = { add = true }
+  local function add_preset()
+    edit_preset(nil)
+  end
+  vim.ui.select(choices, {
+    prompt = "Agent presets",
+    placeholder = #presets == 0 and "No saved presets" or "Search saved presets...",
+    footer = "a add   Enter edit/delete   / search   Esc close",
+    extra_keymaps = function(buf, picker)
+      vim.keymap.set("n", "a", function()
+        picker.close()
+        add_preset()
+      end, { buffer = buf, nowait = true, silent = true, desc = "Add agent preset" })
+    end,
+    format_item = function(item)
+      if item.add then return "+ Add preset" end
+      return preset_row(config, item.preset)
+    end,
+  }, function(item)
+    if not item then return end
+    if item.add then
+      add_preset()
+      return
+    end
+    vim.ui.select({ "Edit", "Delete" }, { prompt = item.preset.name }, function(action)
+      if action == "Edit" then
+        edit_preset(item.index)
+      elseif action == "Delete" then
+        vim.ui.select({ "Cancel", "Delete" }, { prompt = "Delete preset " .. item.preset.name .. "?" }, function(confirm)
+          if confirm ~= "Delete" then return end
+          local removed, err = config.delete_preset(item.index)
+          if not removed then
+            notify(err, vim.log.levels.ERROR)
+            return
+          end
+          notify("Deleted preset " .. removed.name)
+        end)
+      end
+    end)
+  end)
+end
+
+-- Kept for :AgentPreset and existing configs.
+M.select_preset = M.manage_presets
 
 function M.hide_all()
   require("agent.ui").hide_all()
@@ -155,7 +297,9 @@ end
 function M.implement_todo()
   local context = current_context()
   local prompt = ("Implement todo at %s. If todo is not at this path and line location implement all todos from this file."):format(file_ref(context))
-  run_hidden_prompt(context, prompt, "Todo")
+  M.choose_preset("Implement todo with", function(preset)
+    run_hidden_prompt(context, prompt, "Todo", preset)
+  end)
 end
 
 function M.fix_error()
@@ -183,7 +327,9 @@ function M.fix_error()
     prompt = ("Implement the feature or fix the error at %s. If no error is found at the given position, fix all errors found in this file."):format(ref)
   end
 
-  run_hidden_prompt(context, prompt, "Error-fix")
+  M.choose_preset("Fix error with", function(preset)
+    run_hidden_prompt(context, prompt, "Error-fix", preset)
+  end)
 end
 
 function M.clear_done()
@@ -242,8 +388,8 @@ function M.setup(opts)
   })
 
   vim.api.nvim_create_user_command("AgentPreset", function()
-    M.select_preset()
-  end, { desc = "Choose harness, model, and level for new Agent chats" })
+    M.manage_presets()
+  end, { desc = "Manage saved Agent presets" })
 
   vim.api.nvim_create_user_command("PyAgent", default_agent_command("pi"), {
     desc = "Preselect Pi backend for new Agent chats",

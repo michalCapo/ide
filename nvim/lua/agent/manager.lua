@@ -39,7 +39,6 @@ local function create(context, prompt, title, user_prompt, opts)
   context = context or {}
   opts = opts or {}
   M.seq = M.seq + 1
-  local preset = config.options.preset or {}
   local agent = {
     id = tostring(M.seq),
     title = short_title(title or user_prompt or prompt),
@@ -53,8 +52,9 @@ local function create(context, prompt, title, user_prompt, opts)
     updated_at = os.time(),
     kind = "terminal",
     agent_name = opts.agent or opts.agent_name or config.options.default_agent or "pi",
-    model = opts.model ~= nil and opts.model or preset.model,
-    level = opts.level ~= nil and opts.level or preset.level,
+    model = opts.model,
+    level = opts.level or opts.reasoning,
+    preset_name = opts.preset_name,
   }
   M.agents[#M.agents + 1] = agent
   M.last_created_agent = agent
@@ -95,6 +95,13 @@ function M.last_created()
 
   M.last_created_agent = nil
   return nil
+end
+
+function M.has_chats()
+  for _, agent in ipairs(M.agents) do
+    if agent.status ~= "deleted" then return true end
+  end
+  return false
 end
 
 function M.start(context, prompt, opts)

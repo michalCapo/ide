@@ -523,7 +523,12 @@ nav = function(delta)
   end
   if target > #chats then
     -- Past the last chat: Ctrl-n creates a new one.
-    M.new_chat(stack.context)
+    local previous = chats[idx]
+    M.new_chat(stack.context, {
+      agent = previous.agent_name,
+      model = previous.model,
+      level = previous.level,
+    })
     return
   end
   vim.cmd("stopinsert")
@@ -586,11 +591,11 @@ function M.open_stack(context)
   M.refresh_status()
 end
 
-function M.new_chat(context)
+function M.new_chat(context, opts)
   if context then
     stack.context = context
   end
-  local chat = manager.start_empty(stack.context or {}, { agent = config.options.default_agent })
+  local chat = manager.start_empty(stack.context or {}, opts or { agent = config.options.default_agent })
   stack.current_id = chat.id
   stack.open = true
   render()
