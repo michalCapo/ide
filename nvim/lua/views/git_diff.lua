@@ -80,6 +80,27 @@ local function repo_root()
   return vim.trim(output)
 end
 
+local function current_only_marker(root)
+  local directory = vim.fn.stdpath("state") .. "/lazydiff/current-only"
+  return directory, directory .. "/" .. vim.fn.sha256(root)
+end
+
+local function load_current_only(root)
+  local _, marker = current_only_marker(root)
+  return vim.fn.filereadable(marker) == 1
+end
+
+local function persist_current_only(root, enabled)
+  local directory, marker = current_only_marker(root)
+  if enabled then
+    if vim.fn.mkdir(directory, "p") == 0 and vim.fn.isdirectory(directory) ~= 1 then
+      return false
+    end
+    return pcall(vim.fn.writefile, { root }, marker)
+  end
+  return vim.fn.delete(marker) == 0 or vim.fn.filereadable(marker) == 0
+end
+
 local function split_nul(text)
   local items = {}
   local start = 1
@@ -1447,6 +1468,9 @@ function M.toggle_current_only()
   local cursor_row = vim.api.nvim_win_get_cursor(state.diff_win)[1]
   local source_row = nearest_source_row(cursor_row)
   state.current_only = not state.current_only
+  if not persist_current_only(state.root, state.current_only) then
+    vim.notify("Git diff view: could not save view mode", vim.log.levels.WARN)
+  end
   render_file(nil, source_row)
 end
 
@@ -1481,8 +1505,6 @@ function M.select_file(index, change_position)
     return
   end
   state.index = math.max(1, math.min(index, #state.files))
-  -- Current-only mode is intentionally temporary for one opening of a file.
-  state.current_only = false
   render_file(change_position)
 end
 
@@ -1524,6 +1546,7 @@ function M.open(opts)
     return
   end
   state.root = root
+  state.current_only = load_current_only(root)
 
   local files, files_err = changed_files()
   if not files then
@@ -1537,7 +1560,6 @@ function M.open(opts)
 
   state.files = files
   state.index = 1
-  state.current_only = false
   if type(opts.focus_file) == "string" and opts.focus_file ~= "" then
     for index, file in ipairs(files) do
       if file.path == opts.focus_file then
