@@ -17,8 +17,28 @@ if [ ! -x "$APP_DIR/gitui" ]; then
   rmdir "$TMP_DIR" 2>/dev/null || true
 fi
 
-USER_THEME=${XDG_CONFIG_HOME:-${HOME:-/tmp}/.config}/gitui/theme.ron
-if [ -f "$USER_THEME" ]; then
-  exec "$APP_DIR/gitui" "$@"
+# GitUI uses libgit2 and cannot read OpenSSH's IdentityFile configuration.
+# Give it an agent when the desktop/session did not provide one; regular git
+# does not need this because it invokes OpenSSH directly.
+STARTED_AGENT=0
+if [ -z "${SSH_AUTH_SOCK:-}" ] && command -v ssh-agent >/dev/null 2>&1 && command -v ssh-add >/dev/null 2>&1; then
+  eval "$(ssh-agent -s)" >/dev/null
+  STARTED_AGENT=1
+  for key in "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_ecdsa"; do
+    [ ! -f "$key" ] || ssh-add "$key" >/dev/null 2>&1 || true
+  done
 fi
-exec "$APP_DIR/gitui" --theme "$APP_DIR/theme.ron" "$@"
+
+USER_THEME=${XDG_CONFIG_HOME:-${HOME:-/tmp}/.config}/gitui/theme.ron
+set +e
+if [ -f "$USER_THEME" ]; then
+  "$APP_DIR/gitui" "$@"
+else
+  "$APP_DIR/gitui" --theme "$APP_DIR/theme.ron" "$@"
+fi
+STATUS=$?
+set -e
+if [ "$STARTED_AGENT" = 1 ]; then
+  ssh-agent -k >/dev/null 2>&1 || true
+fi
+exit "$STATUS"
