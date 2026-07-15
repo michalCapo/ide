@@ -1,8 +1,11 @@
 (
-    // Use a dark selected row so both light and forced selection text stay clear.
-    selection_bg: Some("#334155"),
+    // GitUI leaves commit subjects black but forces other selected text white;
+    // this mid-blue keeps both readable.
+    selection_bg: Some("#6384a8"),
     selection_fg: Some("#ffffff"),
     use_selection_fg: Some(true),
-    // GitUI does not apply selection_fg to tags; blue remains legible on both surfaces.
+    // GitUI does not apply selection_fg to tags or branches; blue remains
+    // legible on both selected and normal rows.
     tag_fg: Some("#3b82f6"),
+    branch_fg: Some("#3b82f6"),
 )
