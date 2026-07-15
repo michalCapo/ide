@@ -17,6 +17,7 @@ local state = {
   commit_history = nil,
   commit_history_index = nil,
   diff_cache = {},
+  current_only = false,
 }
 
 local namespace = vim.api.nvim_create_namespace("git_diff_view")
@@ -185,6 +186,7 @@ local function close()
   state.commit_prompt_buf = nil
   state.commit_history_index = nil
   state.diff_cache = {}
+  state.current_only = false
 
   if had_active_view then
     vim.schedule(function()
@@ -215,7 +217,7 @@ local function set_readonly_buffer(buf, lines, name, filetype)
   if name then
     pcall(vim.api.nvim_buf_set_name, buf, name)
   end
-  if filetype and filetype ~= "" then
+  if filetype ~= nil then
     vim.api.nvim_set_option_value("filetype", filetype, { buf = buf })
   end
 end
@@ -867,6 +869,7 @@ local function configure_diff_keymaps(buf)
   vim.keymap.set("n", "L", M.open_gitui, vim.tbl_extend("force", opts, { desc = "Open gitui" }))
   vim.keymap.set("n", "c", open_commit_prompt, vim.tbl_extend("force", opts, { desc = "Commit changes" }))
   vim.keymap.set("n", "e", edit_current_file, vim.tbl_extend("force", opts, { desc = "Edit current file and close git diff view" }))
+  vim.keymap.set("n", "<Tab>", M.toggle_current_only, vim.tbl_extend("force", opts, { desc = "Toggle diff/current file view" }))
 end
 
 local function hide_tabline()
@@ -1229,6 +1232,75 @@ local function build_full_file_diff(file)
   return result
 end
 
+local function build_current_file_view(file, diff_result)
+  local lines = file.status:find("D") and {} or file_lines_from_worktree(file.path)
+  local result = {
+    lines = lines,
+    line_marks = {},
+    inline_marks = {},
+    change_targets = {},
+    change_groups = {},
+    source_rows = {},
+    current_only = true,
+  }
+
+  for row = 1, #lines do
+    result.source_rows[row] = row
+  end
+
+  local groups = diff_result.change_groups or {}
+  if file.status:find("%?") then
+    groups = {
+      {
+        new_start = 1,
+        new_count = #lines,
+        old_start = 0,
+        old_count = 0,
+        deletes = {},
+        adds = vim.deepcopy(lines),
+      },
+    }
+  end
+
+  for _, group in ipairs(groups) do
+    local new_start = group.new_start or 1
+    local new_count = group.new_count or 0
+    local first_row = math.min(math.max(new_start, 1), math.max(#lines, 1))
+    local last_row = first_row
+
+    if new_count > 0 then
+      last_row = math.min(new_start + new_count - 1, #lines)
+      for row = first_row, last_row do
+        table.insert(result.line_marks, {
+          row = row - 1,
+          group = "DiffAdd",
+          start_col = 0,
+          end_col = -1,
+        })
+        table.insert(result.change_targets, { row = row, col = 0 })
+      end
+    else
+      -- A deletion has no current line to color. Keep an invisible navigation
+      -- anchor at its former position so block actions still work.
+      table.insert(result.change_targets, { row = first_row, col = 0 })
+    end
+
+    table.insert(result.change_groups, vim.tbl_extend("force", vim.deepcopy(group), {
+      row = first_row,
+      col = 0,
+      start_row = first_row,
+      end_row = last_row,
+    }))
+  end
+
+  return result
+end
+
+local function file_filetype(path)
+  local ok, filetype = pcall(vim.filetype.match, { filename = path })
+  return ok and filetype or ""
+end
+
 local function diff_cache_key(file)
   return table.concat({
     file.path or "",
@@ -1243,8 +1315,16 @@ local function apply_diff_highlights(buf, result)
   vim.api.nvim_buf_clear_namespace(buf, namespace, 0, -1)
 
   for _, mark in ipairs(result.line_marks) do
-    -- Keep the +/- marker colored without washing the entire changed line.
-    vim.api.nvim_buf_add_highlight(buf, namespace, mark.group, mark.row, 0, 2)
+    -- Diff mode colors only the +/- marker; current-file mode colors the full
+    -- changed line while omitting word-level overlays.
+    vim.api.nvim_buf_add_highlight(
+      buf,
+      namespace,
+      mark.group,
+      mark.row,
+      mark.start_col or 0,
+      mark.end_col or 2
+    )
   end
   for _, mark in ipairs(result.inline_marks) do
     vim.api.nvim_buf_add_highlight(buf, namespace, mark.group, mark.row, mark.start_col, mark.end_col)
@@ -1311,33 +1391,46 @@ local function restore_diff_winbar()
   end
 end
 
-local function render_file(change_position)
+local function render_file(change_position, source_row)
   local file = state.files[state.index]
   if not file then
     return
   end
 
   local cache_key = diff_cache_key(file)
-  local result = state.diff_cache[cache_key]
-  if not result then
-    result = build_full_file_diff(file)
-    state.diff_cache[cache_key] = result
+  local diff_result = state.diff_cache[cache_key]
+  if not diff_result then
+    diff_result = build_full_file_diff(file)
+    state.diff_cache[cache_key] = diff_result
   end
+  local result = state.current_only and build_current_file_view(file, diff_result) or diff_result
   state.change_targets = result.change_targets
   state.change_groups = result.change_groups
   state.source_rows = result.source_rows
-  set_readonly_buffer(state.diff_buf, result.lines, "gitdiff://" .. file.path, "diff")
+  local filetype = state.current_only and file_filetype(file.path) or "diff"
+  set_readonly_buffer(state.diff_buf, result.lines, "gitdiff://" .. file.path, filetype)
   apply_diff_highlights(state.diff_buf, result)
 
   vim.api.nvim_win_set_buf(state.diff_win, state.diff_buf)
   configure_diff_window(state.diff_win)
   pad_diff_end(state.diff_buf, state.diff_win)
-  state.diff_winbar = diff_file_winbar(file, result)
+  state.diff_winbar = diff_file_winbar(file, diff_result)
   restore_diff_winbar()
   disable_diff_folds(state.diff_win)
   pcall(vim.api.nvim_win_call, state.diff_win, function()
-    local targets = (change_position == "last_group" or change_position == "first_group") and state.change_groups or state.change_targets
-    local target = (change_position == "last" or change_position == "last_group") and targets[#targets] or targets[1]
+    local target = nil
+    if source_row then
+      for row, candidate_source_row in ipairs(state.source_rows) do
+        if candidate_source_row == source_row then
+          target = { row = row, col = 0 }
+          break
+        end
+      end
+    end
+    if not target then
+      local targets = (change_position == "last_group" or change_position == "first_group") and state.change_groups or state.change_targets
+      target = (change_position == "last" or change_position == "last_group") and targets[#targets] or targets[1]
+    end
     if target then
       vim.api.nvim_win_set_cursor(0, { target.row, target.col or 0 })
       vim.cmd("normal! zz")
@@ -1345,6 +1438,16 @@ local function render_file(change_position)
       vim.cmd("normal! gg")
     end
   end)
+end
+
+function M.toggle_current_only()
+  if not (state.diff_win and vim.api.nvim_win_is_valid(state.diff_win)) then
+    return
+  end
+  local cursor_row = vim.api.nvim_win_get_cursor(state.diff_win)[1]
+  local source_row = nearest_source_row(cursor_row)
+  state.current_only = not state.current_only
+  render_file(nil, source_row)
 end
 
 refresh_everything = function(keep_path)
@@ -1378,6 +1481,8 @@ function M.select_file(index, change_position)
     return
   end
   state.index = math.max(1, math.min(index, #state.files))
+  -- Current-only mode is intentionally temporary for one opening of a file.
+  state.current_only = false
   render_file(change_position)
 end
 
@@ -1432,6 +1537,7 @@ function M.open(opts)
 
   state.files = files
   state.index = 1
+  state.current_only = false
   if type(opts.focus_file) == "string" and opts.focus_file ~= "" then
     for index, file in ipairs(files) do
       if file.path == opts.focus_file then
