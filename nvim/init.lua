@@ -1778,14 +1778,14 @@ vim.keymap.set({ "n", "t" }, "<Esc>3", _G.nvim_focus_dap_terminal, { desc = "Foc
 -- makes every typed space ambiguous for `timeoutlen` and " dT" triggers it.
 vim.keymap.set({ "n", "t" }, "<leader>dT", _G.nvim_focus_dap_terminal, { desc = "Focus DAP terminal", silent = true })
 
-function _G.open_gitui()
-  local gitui = vim.env.NVIM_PORTABLE_GITUI or "gitui"
-  if vim.fn.executable(gitui) ~= 1 then
-    vim.notify("gitui is not installed or not on PATH", vim.log.levels.ERROR)
+function _G.open_lazygit()
+  local lazygit = vim.env.NVIM_PORTABLE_LAZYGIT or "lazygit"
+  if vim.fn.executable(lazygit) ~= 1 then
+    vim.notify("lazygit is not installed or not on PATH", vim.log.levels.ERROR)
     return
   end
 
-  local function gitui_float_config()
+  local function lazygit_float_config()
     return {
       relative = "editor",
       row = 0,
@@ -1800,38 +1800,57 @@ function _G.open_gitui()
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
 
-  local win = vim.api.nvim_open_win(buf, true, gitui_float_config())
+  local win = vim.api.nvim_open_win(buf, true, lazygit_float_config())
+  local edit_request = vim.fn.tempname()
 
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
 
   local resize_autocmd
-  local function resize_gitui()
+  local function resize_lazygit()
     if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_set_config(win, gitui_float_config())
+      vim.api.nvim_win_set_config(win, lazygit_float_config())
     end
   end
 
   resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
-    callback = vim.schedule_wrap(resize_gitui),
-    desc = "Resize fullscreen gitui float",
+    callback = vim.schedule_wrap(resize_lazygit),
+    desc = "Resize fullscreen lazygit float",
   })
 
-  local job_id = vim.fn.termopen({ gitui }, {
+  local job_id = vim.fn.termopen({ lazygit }, {
     cwd = vim.fn.getcwd(),
+    env = {
+      LAZYGIT_NVIM_EDIT_REQUEST = edit_request,
+    },
     on_exit = vim.schedule_wrap(function()
+      local pending_edit
+      if vim.fn.filereadable(edit_request) == 1 then
+        local lines = vim.fn.readfile(edit_request)
+        if lines[1] and lines[1] ~= "" then
+          pending_edit = {
+            file = lines[1],
+            line = math.max(tonumber(lines[2]) or 1, 1),
+          }
+        end
+      end
+      pcall(vim.fn.delete, edit_request)
+
       if resize_autocmd then
         pcall(vim.api.nvim_del_autocmd, resize_autocmd)
       end
       if vim.api.nvim_win_is_valid(win) then
         vim.api.nvim_win_close(win, true)
       end
-      vim.cmd("checktime")
+      if pending_edit then
+        vim.cmd.edit(vim.fn.fnameescape(pending_edit.file))
+        pcall(vim.api.nvim_win_set_cursor, 0, { pending_edit.line, 0 })
+      end
     end),
   })
 
-  local function send_gitui_escape()
+  local function send_lazygit_escape()
     if job_id and job_id > 0 then
       vim.api.nvim_chan_send(job_id, "\27")
     end
@@ -1840,9 +1859,9 @@ function _G.open_gitui()
     end
   end
 
-  vim.keymap.set({ "t", "n" }, "<esc>", send_gitui_escape, {
+  vim.keymap.set({ "t", "n" }, "<esc>", send_lazygit_escape, {
     buffer = buf,
-    desc = "Send Esc to gitui",
+    desc = "Send Esc to lazygit",
     nowait = true,
     silent = true,
   })
@@ -2394,7 +2413,7 @@ _G.nvim_keymap_search_groups = {
       { "<leader>o / <leader>go", "Search symbols in project" },
       { "<leader>e", "Project errors view" },
       { "<leader>f", "Toggle file explorer" },
-      { "<leader>gg", "Open gitui" },
+      { "<leader>gg", "Open lazygit" },
     },
   },
   {
@@ -7559,7 +7578,7 @@ setup_debugging()
 
 local git_diff_view = require("views.git_diff")
 require("views.search")
-vim.keymap.set("n", "<leader>gg", _G.open_gitui, { desc = "Open gitui" })
+vim.keymap.set("n", "<leader>gg", _G.open_lazygit, { desc = "Open lazygit" })
 vim.keymap.set("n", "<leader>ge", function()
   references_view.project_errors()
 end, { desc = "Project errors" })

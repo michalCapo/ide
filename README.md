@@ -1,6 +1,6 @@
 # Portable terminal tools
 
-Personal Neovim, GitUI, and Vifm configuration packaged as portable Linux
+Personal Neovim, Lazygit, and Vifm configuration packaged as portable Linux
 commands. The build bundles each upstream executable with its configuration and
 also creates the `lazydiff` companion command.
 
@@ -10,11 +10,11 @@ also creates the `lazydiff` companion command.
 | --- | --- | --- |
 | `nvim` | yes | yes |
 | `lazydiff` | yes | yes |
-| `gitui` | yes | yes |
+| `lazygit` | yes | yes |
 | `vifm` | yes | no |
 
 Vifm is omitted on ARM64 because upstream does not publish an ARM64 Linux
-binary. Existing `~/.config/gitui` and `~/.config/vifm` directories are not
+binary. Existing `~/.config/lazygit` and `~/.config/vifm` directories are not
 changed. The launchers unpack their bundled configuration below
 `${XDG_CACHE_HOME:-~/.cache}`.
 
@@ -24,7 +24,7 @@ changed. The launchers unpack their bundled configuration below
 - `make`, `curl`, `tar`, `sha256sum`, and Bash
 - x86_64 host when building the Vifm package
 
-The Neovim plugins, themes, GitUI configuration, and Vifm configuration are
+The Neovim plugins, themes, Lazygit configuration, and Vifm configuration are
 included in this repository. Downloaded upstream binaries are checksum-verified
 and retained in `.cache/`.
 
@@ -53,7 +53,7 @@ make install
 Build settings can be overridden on the command line:
 
 ```sh
-make build ARCH=arm64 NVIM_VERSION=v0.12.4 GITUI_VERSION=0.28.1
+make build ARCH=arm64 NVIM_VERSION=v0.12.4 LAZYGIT_VERSION=0.63.0
 make build VIFM_VERSION=0.14.4
 make install PREFIX=/custom/prefix
 ```
@@ -72,7 +72,8 @@ make clean   # remove dist/ but keep cached downloads
 
 - `nvim/` contains the Neovim configuration, bundled plugins, and launcher
   templates.
-- `gitui/` contains the GitUI configuration and parent-editor helper.
+- `lazygit/` contains the active Lazygit configuration and parent-editor helper.
+- `gitui/` is retained but disabled for now.
 - `vifm/` contains the Vifm configuration, colors, and scripts.
 - The root `Makefile` builds all portable commands and release assets.
 
