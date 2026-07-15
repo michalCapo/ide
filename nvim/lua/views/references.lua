@@ -552,7 +552,14 @@ local function render(files, title, scheme)
 
   local buf = vim.api.nvim_create_buf(false, true)
   state.buf = buf
-  vim.api.nvim_buf_set_name(buf, (scheme or "locations") .. "://" .. (title or "symbol"))
+  -- A previous location view can still be visible while a new search is
+  -- rendered. Include the buffer id so repeated searches never hit E95.
+  vim.api.nvim_buf_set_name(buf, string.format(
+    "%s://%s/%d",
+    scheme or "locations",
+    title or "symbol",
+    buf
+  ))
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
   vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
