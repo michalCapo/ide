@@ -4,6 +4,11 @@
     selection_bg: Some("#6384a8"),
     selection_fg: Some("#ffffff"),
     use_selection_fg: Some(true),
+    // The defaults use ANSI blue for the command bar, which renders as the
+    // harsh pure-blue blocks shown on light terminals. Use explicit RGB colors.
+    cmdbar_bg: Some("#dbeafe"),
+    cmdbar_extra_lines_bg: Some("#dbeafe"),
+    command_fg: Some("#172554"),
     // GitUI does not apply selection_fg to tags or branches; blue remains
     // legible on both selected and normal rows.
     tag_fg: Some("#3b82f6"),
