@@ -59,7 +59,7 @@ local function setup_ui()
 end
 
 -- opts.focus_file: repo-relative path to open on (set via LAZYDIFF_FILE by the
--- wrapper / lazygit keybinding).
+-- wrapper / gitui keybinding).
 function M.launch(opts)
   opts = opts or {}
   vim.g.lazydiff_standalone = true
@@ -69,7 +69,7 @@ function M.launch(opts)
   vim.schedule(function()
     local tabs_before = #vim.api.nvim_list_tabpages()
     -- allow_empty: open even with a clean tree, so lazydiff always launches
-    -- (you can still press `g` for lazygit, `R` to refresh, `q` to quit).
+    -- (you can still press `g` for gitui, `R` to refresh, `q` to quit).
     local focus_file = opts.focus_file
     if focus_file == "" then
       focus_file = nil

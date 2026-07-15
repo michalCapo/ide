@@ -3,7 +3,7 @@ SHELL := /bin/sh
 
 ARCH ?= x86_64
 NVIM_VERSION ?= v0.12.4
-LAZYGIT_VERSION ?= 0.63.0
+GITUI_VERSION ?= 0.28.1
 VIFM_VERSION ?= 0.14.4
 
 DIST_DIR := dist
@@ -12,35 +12,37 @@ RELEASE_DIR := $(DIST_DIR)/release
 
 NVIM_NAME := nvim
 LAZYDIFF_NAME := lazydiff
-LAZYGIT_NAME := lazygit
+GITUI_NAME := gitui
 VIFM_NAME := vifm
 NVIM_OUTPUT := $(DIST_DIR)/$(NVIM_NAME)
 LAZYDIFF_OUTPUT := $(DIST_DIR)/$(LAZYDIFF_NAME)
-LAZYGIT_OUTPUT := $(DIST_DIR)/$(LAZYGIT_NAME)
+GITUI_OUTPUT := $(DIST_DIR)/$(GITUI_NAME)
 VIFM_OUTPUT := $(DIST_DIR)/$(VIFM_NAME)
 
 NVIM_SOURCE_DIR := nvim
-LAZYGIT_SOURCE_DIR := lazygit
+GITUI_SOURCE_DIR := gitui
 VIFM_SOURCE_DIR := vifm
 
 NVIM_ARCHIVE := $(DOWNLOAD_DIR)/nvim-linux-$(ARCH)-$(NVIM_VERSION).tar.gz
 NVIM_URL := https://github.com/neovim/neovim/releases/download/$(NVIM_VERSION)/nvim-linux-$(ARCH).tar.gz
-LAZYGIT_ARCHIVE := $(DOWNLOAD_DIR)/lazygit-linux-$(ARCH)-v$(LAZYGIT_VERSION).tar.gz
-LAZYGIT_URL := https://github.com/jesseduffield/lazygit/releases/download/v$(LAZYGIT_VERSION)/lazygit_$(LAZYGIT_VERSION)_linux_$(ARCH).tar.gz
+GITUI_ARCHIVE := $(DOWNLOAD_DIR)/gitui-linux-$(ARCH)-v$(GITUI_VERSION).tar.gz
+GITUI_RELEASE_ARCH_x86_64 := x86_64
+GITUI_RELEASE_ARCH_arm64 := aarch64
+GITUI_URL := https://github.com/gitui-org/gitui/releases/download/v$(GITUI_VERSION)/gitui-linux-$(GITUI_RELEASE_ARCH_$(ARCH)).tar.gz
 VIFM_APPIMAGE := $(DOWNLOAD_DIR)/vifm-linux-x86_64-v$(VIFM_VERSION).AppImage
 VIFM_URL := https://github.com/vifm/vifm/releases/download/v$(VIFM_VERSION)/vifm-v$(VIFM_VERSION)-x86_64.AppImage
 
 NVIM_SHA256_x86_64 := 012bf3fcac5ade43914df3f174668bf64d05e049a4f032a388c027b1ebd78628
 NVIM_SHA256_arm64 := ceb7e88c6b681f0515d135dcdfad54f5eb4373b25ce6172197cd9a69c758063f
-LAZYGIT_SHA256_x86_64 := cf5cfa3e116d7775f3600a51ec1d9ce7ba554a08b9566c7c2da83cb0023efabf
-LAZYGIT_SHA256_arm64 := aac147abf5ce43afe6ae8bcb14b0d479111975a189302d7a99386deca70d57f7
+GITUI_SHA256_x86_64 := f6149b9ae203397158b0c89c13cfde718e7121d3d3cd2ebc597f93d6628d9b5b
+GITUI_SHA256_arm64 := 2a640da05b73e9152a7bf92bfd7c23acd9d60438f4f2cabb62357014a5fd7c28
 VIFM_SHA256_x86_64 := c8568514e0bf276c2031a381ed7a2c48312deb29c528575060c7cd1da40d99c5
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= nvim
 NVIM_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
-LAZYGIT_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/lazygit-portable
+GITUI_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/gitui-portable
 VIFM_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/vifm-portable
 
 .PHONY: all help build update install release-assets publish clean
@@ -50,7 +52,7 @@ all: help
 help:
 	@printf '%s\n' \
 	  'Available commands:' \
-	  '  make build    Build portable nvim, lazydiff, and lazygit; also vifm on x86_64' \
+	  '  make build    Build portable nvim, lazydiff, and gitui; also vifm on x86_64' \
 	  '  make update   Refresh cached downloads for the selected architecture' \
 	  '  make install  Build and install commands under ~/.local/bin' \
 	  '  make publish  Build and publish the next GitHub release' \
@@ -72,18 +74,18 @@ $(NVIM_ARCHIVE):
 	mv "$$TMP" "$@"
 	trap - EXIT HUP INT TERM
 
-$(LAZYGIT_ARCHIVE):
+$(GITUI_ARCHIVE):
 	set -eu
 	case "$(ARCH)" in
-	  x86_64) EXPECTED='$(LAZYGIT_SHA256_x86_64)' ;;
-	  arm64) EXPECTED='$(LAZYGIT_SHA256_arm64)' ;;
+	  x86_64) EXPECTED='$(GITUI_SHA256_x86_64)' ;;
+	  arm64) EXPECTED='$(GITUI_SHA256_arm64)' ;;
 	  *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;;
 	esac
 	mkdir -p "$(DOWNLOAD_DIR)"
 	TMP="$@.tmp.$$$$"
 	trap 'rm -f "$$TMP"' EXIT HUP INT TERM
-	echo "Downloading Lazygit v$(LAZYGIT_VERSION) for Linux $(ARCH)..."
-	curl -fL --retry 3 -o "$$TMP" "$(LAZYGIT_URL)"
+	echo "Downloading GitUI v$(GITUI_VERSION) for Linux $(ARCH)..."
+	curl -fL --retry 3 -o "$$TMP" "$(GITUI_URL)"
 	printf '%s  %s\n' "$$EXPECTED" "$$TMP" | sha256sum -c -
 	mv "$$TMP" "$@"
 	trap - EXIT HUP INT TERM
@@ -103,22 +105,22 @@ $(VIFM_APPIMAGE):
 update:
 	set -eu
 	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
-	rm -f "$(NVIM_ARCHIVE)" "$(LAZYGIT_ARCHIVE)"
-	$(MAKE) "$(NVIM_ARCHIVE)" "$(LAZYGIT_ARCHIVE)" ARCH="$(ARCH)"
+	rm -f "$(NVIM_ARCHIVE)" "$(GITUI_ARCHIVE)"
+	$(MAKE) "$(NVIM_ARCHIVE)" "$(GITUI_ARCHIVE)" ARCH="$(ARCH)"
 	if [ "$(ARCH)" = x86_64 ]; then
 	  rm -f "$(VIFM_APPIMAGE)"
 	  $(MAKE) "$(VIFM_APPIMAGE)"
 	fi
 
-build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
+build: $(NVIM_ARCHIVE) $(GITUI_ARCHIVE)
 	set -eu
 	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
 	test -f "$(NVIM_SOURCE_DIR)/init.lua" || { echo 'Neovim init.lua is missing' >&2; exit 1; }
 	test -d "$(NVIM_SOURCE_DIR)/lua" || { echo 'Neovim lua directory is missing' >&2; exit 1; }
 	test -d "$(NVIM_SOURCE_DIR)/vscode-theme" || { echo 'Bundled theme is missing' >&2; exit 1; }
 	test -d "$(NVIM_SOURCE_DIR)/nvim-dap" || { echo 'Bundled nvim-dap is missing' >&2; exit 1; }
-	test -f "$(LAZYGIT_SOURCE_DIR)/config.yml" || { echo 'Lazygit config is missing' >&2; exit 1; }
-	test -x "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" || { echo 'Lazygit edit helper is missing or not executable' >&2; exit 1; }
+	test -x "$(GITUI_SOURCE_DIR)/launcher.sh" || { echo 'GitUI launcher is missing or not executable' >&2; exit 1; }
+	test -f "$(GITUI_SOURCE_DIR)/theme.ron" || { echo 'GitUI theme is missing' >&2; exit 1; }
 	WORK=$$(mktemp -d)
 	trap 'rm -rf "$$WORK"' EXIT HUP INT TERM
 	mkdir -p "$$WORK/nvim-payload/config" "$(DIST_DIR)"
@@ -141,24 +143,23 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	chmod 755 "$(NVIM_OUTPUT)"
 	echo "Built $(NVIM_OUTPUT) ($$(du -h "$(NVIM_OUTPUT)" | cut -f1))"
 
-	mkdir -p "$$WORK/lazygit-payload/config" "$$WORK/lazygit-unpacked"
-	tar -xzf "$(LAZYGIT_ARCHIVE)" -C "$$WORK/lazygit-unpacked"
-	test -x "$$WORK/lazygit-unpacked/lazygit" || { echo 'Lazygit archive does not contain lazygit' >&2; exit 1; }
-	mv "$$WORK/lazygit-unpacked/lazygit" "$$WORK/lazygit-payload/lazygit"
-	cp "$(LAZYGIT_SOURCE_DIR)/config.yml" "$(LAZYGIT_SOURCE_DIR)/light-theme.yml" "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" "$$WORK/lazygit-payload/config/"
-	chmod 755 "$$WORK/lazygit-payload/config/nvim-edit-parent"
-	LAZYGIT_CONFIG_HASH=$$(cd "$$WORK/lazygit-payload/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
-	LAZYGIT_HASH=$$(sha256sum "$(LAZYGIT_ARCHIVE)" | cut -d' ' -f1)
-	LAZYGIT_PAYLOAD_ID=$$(printf '%s\n' '$(LAZYGIT_VERSION)-$(ARCH)' "$$LAZYGIT_HASH" "$$LAZYGIT_CONFIG_HASH" | sha256sum | cut -c1-16)
-	LAZYGIT_STUB="$$WORK/lazygit-stub"
-	cp "$(LAZYGIT_SOURCE_DIR)/launcher.sh" "$$LAZYGIT_STUB"
-	sed -i "s/@PAYLOAD_ID@/$$LAZYGIT_PAYLOAD_ID/" "$$LAZYGIT_STUB"
-	LAZYGIT_ARCHIVE_LINE=$$(( $$(wc -l <"$$LAZYGIT_STUB") + 1 ))
-	sed -i "s/@ARCHIVE_LINE@/$$LAZYGIT_ARCHIVE_LINE/" "$$LAZYGIT_STUB"
-	tar -czf "$$WORK/lazygit-payload.tar.gz" -C "$$WORK" lazygit-payload
-	cat "$$LAZYGIT_STUB" "$$WORK/lazygit-payload.tar.gz" >"$(LAZYGIT_OUTPUT)"
-	chmod 755 "$(LAZYGIT_OUTPUT)"
-	echo "Built $(LAZYGIT_OUTPUT) ($$(du -h "$(LAZYGIT_OUTPUT)" | cut -f1))"
+	mkdir -p "$$WORK/gitui-payload" "$$WORK/gitui-unpacked"
+	tar -xzf "$(GITUI_ARCHIVE)" -C "$$WORK/gitui-unpacked"
+	test -x "$$WORK/gitui-unpacked/gitui" || { echo 'GitUI archive does not contain gitui' >&2; exit 1; }
+	mv "$$WORK/gitui-unpacked/gitui" "$$WORK/gitui-payload/gitui"
+	cp "$(GITUI_SOURCE_DIR)/theme.ron" "$$WORK/gitui-payload/theme.ron"
+	GITUI_HASH=$$(sha256sum "$(GITUI_ARCHIVE)" | cut -d' ' -f1)
+	GITUI_THEME_HASH=$$(sha256sum "$(GITUI_SOURCE_DIR)/theme.ron" | cut -d' ' -f1)
+	GITUI_PAYLOAD_ID=$$(printf '%s\n' '$(GITUI_VERSION)-$(ARCH)' "$$GITUI_HASH" "$$GITUI_THEME_HASH" | sha256sum | cut -c1-16)
+	GITUI_STUB="$$WORK/gitui-stub"
+	cp "$(GITUI_SOURCE_DIR)/launcher.sh" "$$GITUI_STUB"
+	sed -i "s/@PAYLOAD_ID@/$$GITUI_PAYLOAD_ID/" "$$GITUI_STUB"
+	GITUI_ARCHIVE_LINE=$$(( $$(wc -l <"$$GITUI_STUB") + 1 ))
+	sed -i "s/@ARCHIVE_LINE@/$$GITUI_ARCHIVE_LINE/" "$$GITUI_STUB"
+	tar -czf "$$WORK/gitui-payload.tar.gz" -C "$$WORK" gitui-payload
+	cat "$$GITUI_STUB" "$$WORK/gitui-payload.tar.gz" >"$(GITUI_OUTPUT)"
+	chmod 755 "$(GITUI_OUTPUT)"
+	echo "Built $(GITUI_OUTPUT) ($$(du -h "$(GITUI_OUTPUT)" | cut -f1))"
 
 	sed 's/@INSTALL_NAME@/$(INSTALL_NAME)/g' "$(NVIM_SOURCE_DIR)/lazydiff.sh" >"$(LAZYDIFF_OUTPUT)"
 	chmod 755 "$(LAZYDIFF_OUTPUT)"
@@ -195,13 +196,13 @@ install: build
 	install -d "$(BINDIR)"
 	install -m 755 "$(NVIM_OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
 	install -m 755 "$(LAZYDIFF_OUTPUT)" "$(BINDIR)/$(LAZYDIFF_NAME)"
-	install -m 755 "$(LAZYGIT_OUTPUT)" "$(BINDIR)/$(LAZYGIT_NAME)"
+	install -m 755 "$(GITUI_OUTPUT)" "$(BINDIR)/$(GITUI_NAME)"
 	if [ "$(ARCH)" = x86_64 ]; then install -m 755 "$(VIFM_OUTPUT)" "$(BINDIR)/$(VIFM_NAME)"; fi
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
-	echo "Installed $(BINDIR)/$(LAZYGIT_NAME)"
+	echo "Installed $(BINDIR)/$(GITUI_NAME)"
 	if [ "$(ARCH)" = x86_64 ]; then echo "Installed $(BINDIR)/$(VIFM_NAME)"; fi
-	rm -rf "$(NVIM_PORTABLE_CACHE_DIR)" "$(LAZYGIT_PORTABLE_CACHE_DIR)" "$(VIFM_PORTABLE_CACHE_DIR)"
+	rm -rf "$(NVIM_PORTABLE_CACHE_DIR)" "$(GITUI_PORTABLE_CACHE_DIR)" "$(VIFM_PORTABLE_CACHE_DIR)"
 	echo 'Cleared portable runtime caches'
 	$(MAKE) clean
 
@@ -212,9 +213,9 @@ release-assets:
 	for ARCH_VALUE in x86_64 arm64; do
 	  $(MAKE) build ARCH="$$ARCH_VALUE"
 	  if [ "$$ARCH_VALUE" = x86_64 ]; then
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYGIT_NAME)" "$(VIFM_NAME)"
+	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(GITUI_NAME)" "$(VIFM_NAME)"
 	  else
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYGIT_NAME)"
+	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(GITUI_NAME)"
 	  fi
 	done
 	rm -rf "$(RELEASE_DIR)"
@@ -236,8 +237,8 @@ release-assets:
 	done
 	[ "$$(uname -s)" = Linux ] || fail "unsupported operating system: $$(uname -s)"
 	case $$(uname -m) in
-	  x86_64|amd64) arch=x86_64; commands='nvim lazydiff lazygit vifm' ;;
-	  aarch64|arm64) arch=arm64; commands='nvim lazydiff lazygit' ;;
+	  x86_64|amd64) arch=x86_64; commands='nvim lazydiff gitui vifm' ;;
+	  aarch64|arm64) arch=arm64; commands='nvim lazydiff gitui' ;;
 	  *) fail "unsupported Linux architecture: $$(uname -m)" ;;
 	esac
 	asset="nvim-linux-$$arch.tar.gz"
@@ -262,7 +263,7 @@ release-assets:
 	for command_name in $$commands; do mv "$$stage/$$command_name" "$$BINDIR/$$command_name"; done
 	rmdir "$$stage"
 	cache_base=$${XDG_CACHE_HOME:-"$$HOME/.cache"}
-	rm -rf "$$cache_base/nvim-portable" "$$cache_base/lazygit-portable" "$$cache_base/vifm-portable"
+	rm -rf "$$cache_base/nvim-portable" "$$cache_base/gitui-portable" "$$cache_base/vifm-portable"
 	for command_name in $$commands; do echo "Installed $$BINDIR/$$command_name"; done
 	case :$${PATH:-}: in
 	  *:"$$BINDIR":*) ;;

@@ -631,32 +631,9 @@ local function edit_current_file()
 
   local full_path = state.root .. "/" .. file.path
 
-  -- When lazydiff is a subprocess of Lazygit running inside Neovim, use the
-  -- same parent-editor handoff as Lazygit's built-in `e` action. Otherwise the
-  -- lazydiff wrapper would replace itself with a new Neovim, leaving us nested
-  -- inside the original Neovim -> Lazygit terminal.
-  local parent_edit_request = vim.env.LAZYGIT_NVIM_EDIT_REQUEST
-  if vim.g.lazydiff_standalone and parent_edit_request and parent_edit_request ~= "" then
-    local helper = vim.env.LAZYGIT_NVIM_EDIT_HELPER
-    if not helper or helper == "" then
-      helper = vim.fn.expand("~/.config/lazygit/nvim-edit-parent")
-    end
-    local output = vim.fn.system({ helper, full_path, tostring(row) })
-    if vim.v.shell_error ~= 0 then
-      local message = vim.trim(output or "")
-      if message == "" then
-        message = "parent editor handoff failed"
-      end
-      vim.notify("Git diff view: " .. message, vim.log.levels.ERROR)
-      return
-    end
-    vim.cmd("qa!")
-    return
-  end
-
   -- Standalone lazydiff runs with -u NORC for a lightweight review UI. Hand
   -- edits back to its wrapper so it can replace this process with the user's
-  -- normal Neovim, matching lazygit's built-in `e` action.
+  -- normal Neovim.
   local handoff = vim.env.LAZYDIFF_EDIT_HANDOFF
   if vim.g.lazydiff_standalone and handoff and handoff ~= "" then
     local ok = pcall(vim.fn.writefile, { full_path, tostring(row), tostring(col) }, handoff)
@@ -753,13 +730,13 @@ function M.refresh()
   vim.notify("Git diff view: refreshed", vim.log.levels.INFO)
 end
 
--- Hand off to lazygit for advanced repo work. Runs it in a full-screen
+-- Hand off to gitui for advanced repo work. Runs it in a full-screen
 -- terminal tab in the same window; on exit we return to the diff view and
--- refresh, since lazygit may have changed the repo state.
-function M.open_lazygit()
-  local lazygit = vim.env.NVIM_PORTABLE_LAZYGIT or "lazygit"
-  if vim.fn.executable(lazygit) ~= 1 then
-    vim.notify("Git diff view: lazygit is not installed", vim.log.levels.ERROR)
+-- refresh, since gitui may have changed the repo state.
+function M.open_gitui()
+  local gitui = vim.env.NVIM_PORTABLE_GITUI or "gitui"
+  if vim.fn.executable(gitui) ~= 1 then
+    vim.notify("Git diff view: gitui is not installed", vim.log.levels.ERROR)
     return
   end
 
@@ -767,10 +744,10 @@ function M.open_lazygit()
   local return_tab = state.tabpage
 
   vim.cmd("tabnew")
-  local lazygit_tab = vim.api.nvim_get_current_tabpage()
+  local gitui_tab = vim.api.nvim_get_current_tabpage()
   local term_buf = vim.api.nvim_get_current_buf()
 
-  vim.fn.jobstart({ lazygit }, {
+  vim.fn.jobstart({ gitui }, {
     cwd = root,
     term = true,
     on_exit = function()
@@ -778,13 +755,13 @@ function M.open_lazygit()
         if return_tab and vim.api.nvim_tabpage_is_valid(return_tab) then
           pcall(vim.api.nvim_set_current_tabpage, return_tab)
         end
-        if vim.api.nvim_tabpage_is_valid(lazygit_tab) then
-          for _, win in ipairs(vim.api.nvim_tabpage_list_wins(lazygit_tab)) do
+        if vim.api.nvim_tabpage_is_valid(gitui_tab) then
+          for _, win in ipairs(vim.api.nvim_tabpage_list_wins(gitui_tab)) do
             pcall(vim.api.nvim_win_close, win, true)
           end
         end
         wipe_buffer(term_buf)
-        -- Reload the view; if lazygit committed/stashed everything away this
+        -- Reload the view; if gitui committed/stashed everything away this
         -- may close it (and, standalone, quit) -- which is the right outcome.
         M.refresh()
       end)
@@ -884,7 +861,7 @@ local function configure_diff_keymaps(buf)
   vim.keymap.set("n", "<Space>", M.stage_current_block, vim.tbl_extend("force", opts, { desc = "Stage current diff block" }))
   vim.keymap.set("n", "a", M.stage_all, vim.tbl_extend("force", opts, { desc = "Stage/unstage all changes" }))
   vim.keymap.set("n", "R", M.refresh, vim.tbl_extend("force", opts, { desc = "Refresh git diff view" }))
-  vim.keymap.set("n", "L", M.open_lazygit, vim.tbl_extend("force", opts, { desc = "Open lazygit" }))
+  vim.keymap.set("n", "L", M.open_gitui, vim.tbl_extend("force", opts, { desc = "Open gitui" }))
   vim.keymap.set("n", "c", open_commit_prompt, vim.tbl_extend("force", opts, { desc = "Commit changes" }))
   vim.keymap.set("n", "e", edit_current_file, vim.tbl_extend("force", opts, { desc = "Edit current file and close git diff view" }))
 end

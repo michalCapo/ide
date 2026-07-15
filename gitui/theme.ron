@@ -1,0 +1,8 @@
+(
+    // Use a dark selected row so both light and forced selection text stay clear.
+    selection_bg: Some("#334155"),
+    selection_fg: Some("#ffffff"),
+    use_selection_fg: Some(true),
+    // GitUI does not apply selection_fg to tags; blue remains legible on both surfaces.
+    tag_fg: Some("#3b82f6"),
+)
