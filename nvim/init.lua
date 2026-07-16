@@ -2548,9 +2548,10 @@ _G.nvim_keymap_search_groups = {
     section = "Agent",
     items = {
       { "<leader>aa", "Agent: toggle chats (open at last active chat)" },
-      { "<leader>as", "Agent: manage saved presets" },
-      { "<leader>at", "Implement todo at cursor (background prompt)" },
-      { "<leader>ae", "Fix error at cursor (background prompt)" },
+      { "<leader>as", "Agent: manage presets and choose default" },
+      { "<leader>ai", "Implementation prompt with default preset (background)" },
+      { "<leader>at", "Implement todo with default preset (background)" },
+      { "<leader>ae", "Fix error with default preset (background)" },
       { "<C-p>/<C-n>", "In chat: previous / next chat (Ctrl-n past last creates new)" },
       { "<C-g>", "In chat: hide all chats" },
       { "<C-d>", "In chat: delete chat" },
@@ -7600,13 +7601,16 @@ vim.keymap.set("n", "<leader>ya", function()
 end, { desc = "Agent: paste current location into active chat" })
 vim.keymap.set("n", "<leader>as", function()
   require("agent").manage_presets()
-end, { desc = "Agent: manage presets" })
+end, { desc = "Agent: manage presets and choose default" })
+vim.keymap.set("n", "<leader>ai", function()
+  require("agent").implement_prompt()
+end, { desc = "Agent: implementation prompt with default preset (background)" })
 vim.keymap.set("n", "<leader>at", function()
   require("agent").implement_todo()
-end, { desc = "Agent: implement todo at cursor (background)" })
+end, { desc = "Agent: implement todo with default preset (background)" })
 vim.keymap.set("n", "<leader>ae", function()
   require("agent").fix_error()
-end, { desc = "Agent: fix error at cursor (background)" })
+end, { desc = "Agent: fix error with default preset (background)" })
 
 -- Register the g-prefix browser after modules install their mappings.
 for _, prefix in ipairs({ "g" }) do

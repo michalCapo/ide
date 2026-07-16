@@ -92,6 +92,7 @@ local function valid_preset(value)
     and type(value.harness) == "string" and value.harness ~= ""
     and (value.model == nil or type(value.model) == "string")
     and (value.reasoning == nil or type(value.reasoning) == "string")
+    and (value.default == nil or type(value.default) == "boolean")
 end
 
 local function load_presets()
@@ -157,6 +158,9 @@ function M.save_preset(preset, index)
   end
   local copy = vim.deepcopy(preset)
   local previous = index and M.options.presets[index] or nil
+  if previous and previous.default then
+    copy.default = true
+  end
   if index then
     M.options.presets[index] = copy
   else
@@ -173,6 +177,31 @@ function M.save_preset(preset, index)
     return nil, err
   end
   return copy, index
+end
+
+function M.default_preset()
+  for index, preset in ipairs(M.options.presets or {}) do
+    if preset.default then
+      return vim.deepcopy(preset), index
+    end
+  end
+  return nil
+end
+
+function M.set_default_preset(index)
+  if not M.options.presets[index] then
+    return nil, "Preset no longer exists"
+  end
+  local previous = vim.deepcopy(M.options.presets)
+  for preset_index, preset in ipairs(M.options.presets) do
+    preset.default = preset_index == index or nil
+  end
+  local ok, err = save_presets()
+  if not ok then
+    M.options.presets = previous
+    return nil, err
+  end
+  return vim.deepcopy(M.options.presets[index])
 end
 
 function M.delete_preset(index)

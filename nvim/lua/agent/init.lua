@@ -148,7 +148,7 @@ local function preset_details(config, preset)
 end
 
 local function preset_row(config, preset)
-  local name = preset.name or ""
+  local name = (preset.default and "● " or "  ") .. (preset.name or "")
   local details = preset_details(config, preset)
   local available = vim.api.nvim_win_get_width(0)
   local picker_width = math.min(math.max(58, math.floor(available * 0.58)), math.max(24, available - 8))
@@ -252,7 +252,7 @@ function M.manage_presets()
   vim.ui.select(choices, {
     prompt = "Agent presets",
     placeholder = #presets == 0 and "No saved presets" or "Search saved presets...",
-    footer = "a add   Enter edit/delete   / search   Esc close",
+    footer = "a add   Enter actions   ● default   / search   Esc close",
     extra_keymaps = function(buf, picker)
       vim.keymap.set("n", "a", function()
         picker.close()
@@ -269,8 +269,15 @@ function M.manage_presets()
       add_preset()
       return
     end
-    vim.ui.select({ "Edit", "Delete" }, { prompt = item.preset.name }, function(action)
-      if action == "Edit" then
+    vim.ui.select({ "Set as default", "Edit", "Delete" }, { prompt = item.preset.name }, function(action)
+      if action == "Set as default" then
+        local preset, err = config.set_default_preset(item.index)
+        if not preset then
+          notify(err, vim.log.levels.ERROR)
+          return
+        end
+        notify("Default preset set to " .. preset.name)
+      elseif action == "Edit" then
         edit_preset(item.index)
       elseif action == "Delete" then
         vim.ui.select({ "Cancel", "Delete" }, { prompt = "Delete preset " .. item.preset.name .. "?" }, function(confirm)
@@ -297,8 +304,30 @@ end
 function M.implement_todo()
   local context = current_context()
   local prompt = ("Implement todo at %s. If todo is not at this path and line location implement all todos from this file."):format(file_ref(context))
-  M.choose_preset("Implement todo with", function(preset)
-    run_hidden_prompt(context, prompt, "Todo", preset)
+  local preset = require("agent.config").default_preset()
+  if not preset then
+    notify("Set a default preset with <leader>as", vim.log.levels.WARN)
+    return
+  end
+  run_hidden_prompt(context, prompt, "Todo", preset)
+end
+
+function M.implement_prompt()
+  local preset = require("agent.config").default_preset()
+  if not preset then
+    notify("Set a default preset with <leader>as", vim.log.levels.WARN)
+    return
+  end
+
+  local context = current_context()
+  vim.ui.input({ prompt = "Implementation prompt: " }, function(input)
+    input = input and vim.trim(input) or ""
+    if input == "" then return end
+    local prompt = ("Dont run code check, just provide code implementation at given location. %s Location: %s."):format(
+      input,
+      file_ref(context)
+    )
+    run_hidden_prompt(context, prompt, "Implementation", preset)
   end)
 end
 
@@ -327,9 +356,12 @@ function M.fix_error()
     prompt = ("Implement the feature or fix the error at %s. If no error is found at the given position, fix all errors found in this file."):format(ref)
   end
 
-  M.choose_preset("Fix error with", function(preset)
-    run_hidden_prompt(context, prompt, "Error-fix", preset)
-  end)
+  local preset = require("agent.config").default_preset()
+  if not preset then
+    notify("Set a default preset with <leader>as", vim.log.levels.WARN)
+    return
+  end
+  run_hidden_prompt(context, prompt, "Error-fix", preset)
 end
 
 function M.clear_done()
@@ -368,6 +400,10 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("AgentTodo", function()
     M.implement_todo()
   end, { desc = "Send hidden prompt: implement todo at cursor" })
+
+  vim.api.nvim_create_user_command("AgentImplement", function()
+    M.implement_prompt()
+  end, { desc = "Send hidden implementation prompt at cursor" })
 
   vim.api.nvim_create_user_command("AgentError", function()
     M.fix_error()
@@ -410,6 +446,7 @@ function M.setup(opts)
   command_alias("agent", "Agent")
   command_alias("agenttoggle", "AgentToggle")
   command_alias("agenttodo", "AgentTodo")
+  command_alias("agentimplement", "AgentImplement")
   command_alias("agenterror", "AgentError")
   command_alias("agentdefault", "AgentDefault")
   command_alias("agentpreset", "AgentPreset")
