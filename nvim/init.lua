@@ -1832,6 +1832,7 @@ function _G.open_lazygit()
           pending_edit = {
             file = lines[1],
             line = math.max(tonumber(lines[2]) or 1, 1),
+            col = math.max(tonumber(lines[3]) or 0, 0),
           }
         end
       end
@@ -1845,7 +1846,10 @@ function _G.open_lazygit()
       end
       if pending_edit then
         vim.cmd.edit(vim.fn.fnameescape(pending_edit.file))
-        pcall(vim.api.nvim_win_set_cursor, 0, { pending_edit.line, 0 })
+        local line_count = math.max(vim.api.nvim_buf_line_count(0), 1)
+        local line = math.min(pending_edit.line, line_count)
+        local text = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1] or ""
+        pcall(vim.api.nvim_win_set_cursor, 0, { line, math.min(pending_edit.col, #text) })
       end
     end),
   })
