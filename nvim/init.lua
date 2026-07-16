@@ -4900,8 +4900,9 @@ open_file_symbol_dialog = function(source_items, opts, on_choice)
     local padding = math.max(0, math.floor((width - vim.fn.strdisplaywidth(line)) / 2))
     footer_lines[index] = string.rep(" ", padding) .. line
   end
-  local selected = #items > 0 and 1 or 0
-  local top = 1
+  local initial_index = tonumber(opts.initial_index) or 1
+  local selected = #items > 0 and math.max(1, math.min(#items, initial_index)) or 0
+  local top = math.max(1, selected - math.max(1, height - 2) + 1)
 
   local buf = vim.api.nvim_create_buf(false, true)
   local footer_buf = vim.api.nvim_create_buf(false, true)
@@ -5279,6 +5280,7 @@ local function searchable_ui_select(source_items, opts, on_choice)
     width_ratio = opts.width_ratio,
     min_width = opts.min_width,
     max_height = opts.max_height,
+    initial_index = opts.initial_index,
     footer = opts.footer,
     line_parts = function(entry)
       return entry.display, {

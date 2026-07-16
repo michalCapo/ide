@@ -227,8 +227,16 @@ function M.choose_preset(prompt, callback)
     edit_preset(nil, callback)
     return
   end
+  local initial_index = 1
+  for index, preset in ipairs(presets) do
+    if preset.default then
+      initial_index = index
+      break
+    end
+  end
   vim.ui.select(presets, {
     prompt = prompt or "Agent preset",
+    initial_index = initial_index,
     format_item = function(preset)
       return preset_row(config, preset)
     end,
