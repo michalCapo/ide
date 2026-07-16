@@ -21,6 +21,11 @@ local state = {
 }
 
 local namespace = vim.api.nvim_create_namespace("git_diff_view")
+local KEYMAP_STATUSLINE = table.concat({
+  " h/l change  j/k block  [c/]c change  n/N file edge  J/K file ",
+  " <Space> stage  d discard  a all  c commit  e edit  <Tab> mode ",
+  " <leader>w wrap  R refresh  L gitui  q/Esc close ",
+})
 
 local function apply_view_highlights()
   local dark = vim.o.background == "dark"
@@ -250,6 +255,7 @@ local function configure_diff_window(win)
   vim.wo[win].cursorline = true
   vim.wo[win].signcolumn = "no"
   vim.wo[win].foldcolumn = "0"
+  vim.wo[win].statusline = KEYMAP_STATUSLINE
 end
 
 local diff_end_pad_ns = vim.api.nvim_create_namespace("GitDiffViewEndPad")

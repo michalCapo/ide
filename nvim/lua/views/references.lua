@@ -2,6 +2,7 @@ local M = {}
 
 local namespace = vim.api.nvim_create_namespace("references_view")
 local ERROR_CONTEXT_LINES = 8
+local KEYMAP_STATUSLINE = " [e/#/C-p previous  ]e/*/C-n/C-e next  e/Enter open  o open all  q/Esc close "
 
 local state = {
   buf = nil,
@@ -77,6 +78,7 @@ local function remember_window_options(win)
   state.view_win = win
   state.previous_window_options = {
     statuscolumn = vim.wo[win].statuscolumn,
+    statusline = vim.wo[win].statusline,
     number = vim.wo[win].number,
     relativenumber = vim.wo[win].relativenumber,
     wrap = vim.wo[win].wrap,
@@ -655,6 +657,7 @@ local function render(files, title, scheme)
   vim.wo[win].number = true
   vim.wo[win].relativenumber = false
   vim.wo[win].statuscolumn = "%!v:lua.nvim_reference_view_statuscolumn()"
+  vim.wo[win].statusline = KEYMAP_STATUSLINE
   local is_error_view = scheme == "errors"
   vim.wo[win].wrap = is_error_view
   vim.wo[win].linebreak = is_error_view

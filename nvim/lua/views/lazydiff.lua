@@ -12,7 +12,8 @@ local M = {}
 local function setup_ui()
   vim.o.termguicolors = true
   vim.o.showtabline = 0
-  vim.o.laststatus = 0
+  -- The git diff view uses its local statusline as a persistent key guide.
+  vim.o.laststatus = 2
   vim.o.ruler = false
   vim.o.showmode = false
   vim.o.swapfile = false
