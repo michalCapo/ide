@@ -77,6 +77,169 @@ end
 
 vim.api.nvim_create_user_command("RereadAllBuffersAndRestartLsp", reread_all_buffers_and_restart_lsp, { desc = "Reread all buffers and restart LSP" })
 
+-- Reload clean buffers after another process changes their files. 'autoread'
+-- protects buffers with unsaved edits; checktime only reports the conflict for
+-- those buffers instead of replacing their contents.
+vim.o.autoread = true
+do
+  if _G.nvim_auto_reload_timer then
+    pcall(_G.nvim_auto_reload_timer.stop, _G.nvim_auto_reload_timer)
+    pcall(_G.nvim_auto_reload_timer.close, _G.nvim_auto_reload_timer)
+  end
+
+  local group = vim.api.nvim_create_augroup("AutoReloadChangedFiles", { clear = true })
+  local timer = vim.uv.new_timer()
+  _G.nvim_auto_reload_timer = timer
+  local check_scheduled = false
+  local disk_versions = {}
+
+  local function current_tab_window_for_buffer(buf)
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.api.nvim_win_get_buf(win) == buf then
+        return win
+      end
+    end
+  end
+
+  local function stop_diffing_buffer(buf)
+    if not vim.api.nvim_buf_is_valid(buf) then
+      return
+    end
+    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_set_option_value("diff", false, { win = win })
+      end
+    end
+  end
+
+  local function show_disk_version(buf)
+    local entry = disk_versions[buf]
+    if not entry or not vim.api.nvim_buf_is_valid(entry.disk_buf) then
+      return
+    end
+
+    local original_win = current_tab_window_for_buffer(buf)
+    if not original_win then
+      return
+    end
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.api.nvim_win_get_buf(win) == entry.disk_buf then
+        return
+      end
+    end
+
+    local previous_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(original_win)
+    vim.cmd("rightbelow vsplit")
+    local disk_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(disk_win, entry.disk_buf)
+    vim.api.nvim_set_option_value("diff", true, { win = original_win })
+    vim.api.nvim_set_option_value("diff", true, { win = disk_win })
+    if vim.api.nvim_win_is_valid(previous_win) then
+      vim.api.nvim_set_current_win(previous_win)
+    end
+  end
+
+  local function update_disk_version(buf, path, lines, filetype)
+    if not vim.api.nvim_buf_is_valid(buf) or not vim.bo[buf].modified then
+      return
+    end
+
+    local entry = disk_versions[buf]
+    if not entry or not vim.api.nvim_buf_is_valid(entry.disk_buf) then
+      local disk_buf = vim.api.nvim_create_buf(false, true)
+      entry = { disk_buf = disk_buf }
+      disk_versions[buf] = entry
+      vim.api.nvim_buf_set_name(disk_buf, "[disk version] " .. path)
+      vim.bo[disk_buf].buftype = "nofile"
+      vim.bo[disk_buf].bufhidden = "wipe"
+      vim.bo[disk_buf].swapfile = false
+      vim.bo[disk_buf].filetype = filetype
+
+      vim.api.nvim_create_autocmd("BufWipeout", {
+        group = group,
+        buffer = disk_buf,
+        once = true,
+        callback = function()
+          if disk_versions[buf] == entry then
+            disk_versions[buf] = nil
+          end
+          vim.schedule(function()
+            stop_diffing_buffer(buf)
+          end)
+        end,
+      })
+    end
+
+    vim.bo[entry.disk_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(entry.disk_buf, 0, -1, false, lines)
+    vim.bo[entry.disk_buf].modifiable = false
+    vim.bo[entry.disk_buf].modified = false
+    show_disk_version(buf)
+    vim.cmd("silent! diffupdate")
+    vim.notify("File changed on disk; opened a diff without replacing unsaved edits", vim.log.levels.WARN)
+  end
+
+  local function check_for_disk_changes()
+    if check_scheduled then
+      return
+    end
+    check_scheduled = true
+    vim.schedule(function()
+      check_scheduled = false
+      pcall(vim.cmd, "silent! checktime")
+    end)
+  end
+
+  -- Focus/buffer events make the common case immediate. The timer also catches
+  -- changes made while Neovim remains focused and idle.
+  vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter" }, {
+    group = group,
+    callback = function(args)
+      check_for_disk_changes()
+      if args.event == "BufEnter" then
+        vim.schedule(function()
+          show_disk_version(args.buf)
+        end)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("FileChangedShell", {
+    group = group,
+    callback = function(args)
+      if vim.v.fcs_reason ~= "conflict" or not vim.bo[args.buf].modified then
+        vim.v.fcs_choice = "ask"
+        return
+      end
+
+      vim.v.fcs_choice = ""
+      local path = vim.api.nvim_buf_get_name(args.buf)
+      local ok, lines = pcall(vim.fn.readfile, path)
+      if not ok then
+        vim.notify("File changed on disk but could not be read: " .. path, vim.log.levels.ERROR)
+        return
+      end
+      local filetype = vim.bo[args.buf].filetype
+      vim.schedule(function()
+        update_disk_version(args.buf, path, lines, filetype)
+      end)
+    end,
+  })
+  timer:start(1000, 1000, check_for_disk_changes)
+
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = group,
+    once = true,
+    callback = function()
+      timer:stop()
+      timer:close()
+      if _G.nvim_auto_reload_timer == timer then
+        _G.nvim_auto_reload_timer = nil
+      end
+    end,
+  })
+end
+
 vim.api.nvim_create_user_command("Reload", function()
   local init_lua = vim.env.NVIM_PORTABLE_INIT or vim.fn.expand("~/.config/nvim/init.lua")
   vim.cmd("luafile " .. vim.fn.fnameescape(init_lua))
