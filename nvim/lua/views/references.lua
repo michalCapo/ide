@@ -565,7 +565,12 @@ local function render(files, title, scheme)
   vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
   vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
   local source_filetype = filetype_for_path(files[1].filename) or vim.bo[state.origin_buf].filetype
-  vim.api.nvim_set_option_value("filetype", source_filetype, { buf = buf })
+  -- This is a stitched preview, not a valid source document. Giving it the
+  -- source filetype makes ftplugins and LSP clients parse the snapshots as one
+  -- file and publish bogus diagnostics. Source highlighting is included
+  -- explicitly by apply_source_syntax() below.
+  vim.api.nvim_set_option_value("filetype", "referenceview", { buf = buf })
+  vim.b[buf].reference_source_filetype = source_filetype
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   vim.api.nvim_set_option_value("readonly", true, { buf = buf })
