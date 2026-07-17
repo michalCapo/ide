@@ -74,6 +74,34 @@ function _G.nvim_reference_view_statuscolumn()
   return "     "
 end
 
+function _G.nvim_reference_view_statusline()
+  local win = tonumber(vim.g.statusline_winid) or vim.api.nvim_get_current_win()
+  local ok, buf = pcall(vim.api.nvim_win_get_buf, win)
+  if not ok or state.buf ~= buf or #state.targets == 0 then
+    return KEYMAP_STATUSLINE
+  end
+
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local row, col = cursor[1], cursor[2]
+  local current = 1
+  local closest_row_distance = math.huge
+  local closest_col_distance = math.huge
+
+  for index, target in ipairs(state.targets) do
+    local row_distance = math.abs(row - target.row)
+    local col_distance = row_distance == 0 and math.abs(col - target.byte_col) or 0
+    if row_distance < closest_row_distance
+        or (row_distance == closest_row_distance and col_distance < closest_col_distance) then
+      current = index
+      closest_row_distance = row_distance
+      closest_col_distance = col_distance
+    end
+  end
+
+  local noun = #state.targets == 1 and "occurrence" or "occurrences"
+  return KEYMAP_STATUSLINE .. "%=" .. string.format(" %d/%d %s ", current, #state.targets, noun)
+end
+
 local function remember_window_options(win)
   state.view_win = win
   state.previous_window_options = {
@@ -657,7 +685,7 @@ local function render(files, title, scheme)
   vim.wo[win].number = true
   vim.wo[win].relativenumber = false
   vim.wo[win].statuscolumn = "%!v:lua.nvim_reference_view_statuscolumn()"
-  vim.wo[win].statusline = KEYMAP_STATUSLINE
+  vim.wo[win].statusline = "%!v:lua.nvim_reference_view_statusline()"
   local is_error_view = scheme == "errors"
   vim.wo[win].wrap = is_error_view
   vim.wo[win].linebreak = is_error_view
