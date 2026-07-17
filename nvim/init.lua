@@ -1678,7 +1678,6 @@ vim.keymap.set("n", "y5", "y%", { desc = "Yank until matching pair", remap = tru
 vim.keymap.set("o", "0", "^", { desc = "Until first non-blank character" })
 vim.keymap.set("o", "4", "$", { desc = "Until end of line" })
 vim.keymap.set("o", "5", "%", { desc = "Until matching pair" })
-vim.keymap.set("n", "<leader>r", reread_all_buffers_and_restart_lsp, { desc = "Reload all buffers and restart LSP" })
 vim.keymap.set("n", "<C-h>", "<C-w>h", { desc = "Focus left window" })
 vim.keymap.set("n", "<C-j>", "<C-w>j", { desc = "Focus lower window" })
 vim.keymap.set("n", "<C-k>", "<C-w>k", { desc = "Focus upper window" })
@@ -2540,7 +2539,6 @@ _G.nvim_keymap_search_groups = {
       { "<leader>w", "Toggle line wrap" },
       { "<leader>yy", "Copy current file and line location" },
       { "<leader>ya", "Paste current file and line location into active chat" },
-      { "<leader>r", "Reload all buffers and restart LSP" },
       { "<C-s>", "Format current buffer and save all files" },
       { ":SaveAllWithFormat", "Format current buffer and save all files" },
       { "<Ctrl-h/j/k/l>", "Move focus left/down/up/right window" },
@@ -2666,12 +2664,17 @@ _G.nvim_keymap_search_groups = {
       { "<F2>", "Save all + select/start/continue/restart debugger" },
       { "<leader><F2>", "Stop debug session" },
       { "<S-F2>", "Select and run a JS/TS configuration" },
+      { "<leader>rr", "Select and run a JS/TS configuration" },
+      { "<leader>rs", "Stop running application" },
+      { "<leader>rk", "Kill running application" },
+      { "<leader>rl", "Rerun last application" },
       { "<F3>", "Toggle scopes" },
       { "<S-F3>", "Toggle callstack" },
       { "<F4>", "Toggle debug REPL" },
       { "<F9>", "Toggle breakpoint" },
       { "<S-F9>", "Conditional breakpoint" },
       { "Up/Down/Right/Left", "Continue/over/into/out while debugging" },
+      { "<leader>d", "Select and start a debug configuration" },
       { "<leader>dc", "Start / continue" },
       { "<leader>db", "Toggle breakpoint" },
       { "<leader>dB", "Conditional breakpoint" },
@@ -2777,7 +2780,7 @@ local which_key = {
     [" c"] = "Code / LSP",
     [" d"] = "Debug",
     [" g"] = "Git / views",
-    [" r"] = "Reload",
+    [" r"] = "Run",
     [" s"] = "Search",
   },
 }
@@ -6635,6 +6638,7 @@ local function setup_debugging()
   end
 
   local active_run_terminal
+  local last_run_terminal
 
   local function open_run_terminal(command, opts, focus_win)
     opts = opts or {}
@@ -6664,6 +6668,10 @@ local function setup_debugging()
     active_run_terminal = {
       job_id = job_id,
       buf = buf,
+      command = vim.deepcopy(command),
+      opts = vim.deepcopy(opts),
+    }
+    last_run_terminal = {
       command = vim.deepcopy(command),
       opts = vim.deepcopy(opts),
     }
@@ -6706,6 +6714,37 @@ local function setup_debugging()
       open_run_terminal(run.command, run.opts, source_win)
     end)
     return true
+  end
+
+  local function stop_run_terminal()
+    local run = active_run_terminal
+    if not run or vim.fn.jobwait({ run.job_id }, 0)[1] ~= -1 then
+      vim.notify("No application is running", vim.log.levels.INFO)
+      return
+    end
+    vim.fn.chansend(run.job_id, "\003")
+  end
+
+  local function kill_run_terminal()
+    local run = active_run_terminal
+    if not run or vim.fn.jobwait({ run.job_id }, 0)[1] ~= -1 then
+      vim.notify("No application is running", vim.log.levels.INFO)
+      return
+    end
+    active_run_terminal = nil
+    pcall(vim.fn.jobstop, run.job_id)
+  end
+
+  local function rerun_last_run_terminal()
+    if active_run_terminal and vim.fn.jobwait({ active_run_terminal.job_id }, 0)[1] == -1 then
+      restart_run_terminal()
+      return
+    end
+    if not last_run_terminal then
+      vim.notify("No previous application run", vim.log.levels.INFO)
+      return
+    end
+    open_run_terminal(last_run_terminal.command, last_run_terminal.opts)
   end
 
   local dap_console_height = 8
@@ -7573,6 +7612,10 @@ local function setup_debugging()
   end
 
   local run_configuration_map_opts = { desc = "Select and run a JS/TS configuration" }
+  vim.keymap.set("n", "<leader>rr", select_run_configuration, run_configuration_map_opts)
+  vim.keymap.set("n", "<leader>rs", stop_run_terminal, { desc = "Run stop" })
+  vim.keymap.set("n", "<leader>rk", kill_run_terminal, { desc = "Run kill" })
+  vim.keymap.set("n", "<leader>rl", rerun_last_run_terminal, { desc = "Run last" })
   vim.keymap.set("n", "<S-F2>", select_run_configuration, run_configuration_map_opts)
   -- Alacritty's terminfo reports Shift-F2 as F14 (CSI 1;2Q).
   vim.keymap.set("n", "<F14>", select_run_configuration, run_configuration_map_opts)
@@ -7659,6 +7702,9 @@ local function setup_debugging()
 
   auto_install_js_debug_adapter_once()
 
+  vim.keymap.set("n", "<leader>d", function()
+    dap.continue({ new = true })
+  end, { desc = "Select and start debug configuration" })
   vim.keymap.set("n", "<leader>dc", function()
     vim.cmd.wall()
     dap.continue()
