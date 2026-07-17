@@ -257,6 +257,7 @@ vim.api.nvim_create_autocmd("RecordingEnter", {
 
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
+vim.keymap.set("n", "<leader>p", reread_all_buffers_and_restart_lsp, { desc = "Reload files and restart LSP" })
 
 -- Clean up quickfix mappings/autocmds left behind by older versions of this config.
 pcall(vim.api.nvim_del_augroup_by_name, "PiQuickfixLocationPreview")
