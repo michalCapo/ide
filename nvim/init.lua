@@ -5401,7 +5401,6 @@ local function lsp_document_symbols_picker()
     open_file_symbol_dialog(visible_items(), {
       prompt = "File symbols",
       placeholder = "Search buffer symbols...",
-      preserve_order_on_filter = true,
       extra_keymaps = function(buf, picker)
         vim.keymap.set("n", "<tab>", function()
           show_all_symbols = not show_all_symbols
