@@ -7764,7 +7764,7 @@ local function git_blame_current_line()
     return
   end
 
-  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local line = math.max(1, vim.api.nvim_win_get_cursor(0)[1])
   local output = vim.fn.systemlist({
     "git", "-C", vim.fn.fnamemodify(path, ":h"), "blame",
     "-L", line .. "," .. line, "--date=short", "--", vim.fn.fnamemodify(path, ":t"),
@@ -7774,7 +7774,15 @@ local function git_blame_current_line()
     return
   end
 
-  vim.notify(table.concat(output, "\n"), vim.log.levels.INFO, { title = "Git blame" })
+  apply_picker_highlights()
+  local _, win = vim.lsp.util.open_floating_preview(output, "text", floating_popup_options({
+    title = " Git blame ",
+    focusable = false,
+    close_events = { "BufLeave", "CursorMoved", "CursorMovedI", "InsertEnter", "FocusLost" },
+    height_cap = 8,
+    height_ratio = 0.2,
+  }))
+  apply_floating_winhighlight(win)
 end
 
 vim.keymap.set("n", "<leader>gb", git_blame_current_line, { desc = "Git blame current line" })
