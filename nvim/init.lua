@@ -2664,7 +2664,8 @@ _G.nvim_keymap_search_groups = {
       { "<F2>", "Save all + select/start/continue/restart debugger" },
       { "<leader><F2>", "Stop debug session" },
       { "<S-F2>", "Select and run a JS/TS configuration" },
-      { "<leader>rr", "Select and run a JS/TS configuration" },
+      { "<leader>rc", "Select and run a JS/TS configuration" },
+      { "<leader>rr", "Restart running application" },
       { "<leader>rs", "Stop running application" },
       { "<leader>rk", "Kill running application" },
       { "<leader>rl", "Rerun last application" },
@@ -2674,8 +2675,8 @@ _G.nvim_keymap_search_groups = {
       { "<F9>", "Toggle breakpoint" },
       { "<S-F9>", "Conditional breakpoint" },
       { "Up/Down/Right/Left", "Continue/over/into/out while debugging" },
-      { "<leader>dd", "Select and start a debug configuration" },
-      { "<leader>dc", "Start / continue" },
+      { "<leader>dc", "Select and start a debug configuration" },
+      { "<leader>dd", "Restart active debugger" },
       { "<leader>db", "Toggle breakpoint" },
       { "<leader>dB", "Conditional breakpoint" },
       { "<leader>dp", "Log point" },
@@ -6725,6 +6726,12 @@ local function setup_debugging()
     vim.fn.chansend(run.job_id, "\003")
   end
 
+  local function restart_active_run_terminal()
+    if not restart_run_terminal() then
+      vim.notify("No application is running", vim.log.levels.INFO)
+    end
+  end
+
   local function kill_run_terminal()
     local run = active_run_terminal
     if not run or vim.fn.jobwait({ run.job_id }, 0)[1] ~= -1 then
@@ -7612,7 +7619,8 @@ local function setup_debugging()
   end
 
   local run_configuration_map_opts = { desc = "Select and run a JS/TS configuration" }
-  vim.keymap.set("n", "<leader>rr", select_run_configuration, run_configuration_map_opts)
+  vim.keymap.set("n", "<leader>rc", select_run_configuration, run_configuration_map_opts)
+  vim.keymap.set("n", "<leader>rr", restart_active_run_terminal, { desc = "Run restart" })
   vim.keymap.set("n", "<leader>rs", stop_run_terminal, { desc = "Run stop" })
   vim.keymap.set("n", "<leader>rk", kill_run_terminal, { desc = "Run kill" })
   vim.keymap.set("n", "<leader>rl", rerun_last_run_terminal, { desc = "Run last" })
@@ -7702,13 +7710,16 @@ local function setup_debugging()
 
   auto_install_js_debug_adapter_once()
 
-  vim.keymap.set("n", "<leader>dd", function()
+  vim.keymap.set("n", "<leader>dc", function()
     dap.continue({ new = true })
   end, { desc = "Select and start debug configuration" })
-  vim.keymap.set("n", "<leader>dc", function()
-    vim.cmd.wall()
-    dap.continue()
-  end, { desc = "Debug start/continue" })
+  vim.keymap.set("n", "<leader>dd", function()
+    if dap.session() == nil then
+      vim.notify("No active debug session", vim.log.levels.INFO)
+      return
+    end
+    restart_dap_session()
+  end, { desc = "Debug restart" })
   vim.keymap.set("n", "<leader>db", dap.toggle_breakpoint, { desc = "Debug toggle breakpoint" })
   vim.keymap.set("n", "<leader>dB", function() floating_input({ prompt = "Breakpoint condition" }, function(condition) if condition and condition ~= "" then dap.set_breakpoint(condition) end end) end, { desc = "Debug conditional breakpoint" })
   vim.keymap.set("n", "<leader>dp", function() floating_input({ prompt = "Log point message" }, function(message) if message and message ~= "" then dap.set_breakpoint(nil, nil, message) end end) end, { desc = "Debug log point" })
