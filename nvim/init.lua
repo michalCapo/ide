@@ -2587,6 +2587,7 @@ _G.nvim_keymap_search_groups = {
       { "<leader>o / <leader>go", "Search symbols in project" },
       { "<leader>e", "Project errors view" },
       { "<leader>f", "Toggle file explorer" },
+      { "<leader>gb", "Git blame current line" },
       { "<leader>gg", "Open lazygit" },
     },
   },
@@ -7755,6 +7756,28 @@ setup_debugging()
 
 local git_diff_view = require("views.git_diff")
 require("views.search")
+
+local function git_blame_current_line()
+  local path = vim.api.nvim_buf_get_name(0)
+  if path == "" then
+    vim.notify("Current buffer has no file path", vim.log.levels.WARN)
+    return
+  end
+
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local output = vim.fn.systemlist({
+    "git", "-C", vim.fn.fnamemodify(path, ":h"), "blame",
+    "-L", line .. "," .. line, "--date=short", "--", vim.fn.fnamemodify(path, ":t"),
+  })
+  if vim.v.shell_error ~= 0 then
+    vim.notify(table.concat(output, "\n"), vim.log.levels.ERROR)
+    return
+  end
+
+  vim.notify(table.concat(output, "\n"), vim.log.levels.INFO, { title = "Git blame" })
+end
+
+vim.keymap.set("n", "<leader>gb", git_blame_current_line, { desc = "Git blame current line" })
 vim.keymap.set("n", "<leader>gg", _G.open_lazygit, { desc = "Open lazygit" })
 vim.keymap.set("n", "<leader>ge", function()
   references_view.project_errors()
