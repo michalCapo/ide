@@ -2674,7 +2674,7 @@ _G.nvim_keymap_search_groups = {
       { "<F9>", "Toggle breakpoint" },
       { "<S-F9>", "Conditional breakpoint" },
       { "Up/Down/Right/Left", "Continue/over/into/out while debugging" },
-      { "<leader>d", "Select and start a debug configuration" },
+      { "<leader>dd", "Select and start a debug configuration" },
       { "<leader>dc", "Start / continue" },
       { "<leader>db", "Toggle breakpoint" },
       { "<leader>dB", "Conditional breakpoint" },
@@ -7702,7 +7702,7 @@ local function setup_debugging()
 
   auto_install_js_debug_adapter_once()
 
-  vim.keymap.set("n", "<leader>d", function()
+  vim.keymap.set("n", "<leader>dd", function()
     dap.continue({ new = true })
   end, { desc = "Select and start debug configuration" })
   vim.keymap.set("n", "<leader>dc", function()
