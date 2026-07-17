@@ -1255,6 +1255,13 @@ local function apply_code_highlights()
 end
 
 local function apply_picker_highlights()
+  local function paint_foreground_on_background(group, foreground_group, background_group)
+    local foreground = vim.api.nvim_get_hl(0, { name = foreground_group, link = false })
+    local background = vim.api.nvim_get_hl(0, { name = background_group, link = false })
+    foreground.bg = background.reverse and background.fg or background.bg
+    vim.api.nvim_set_hl(0, group, foreground)
+  end
+
   vim.api.nvim_set_hl(0, "PiPickerNormal", { link = "NormalFloat" })
   vim.api.nvim_set_hl(0, "PiPickerBorder", { link = "FloatBorder" })
   vim.api.nvim_set_hl(0, "PiPickerSelected", { link = "PmenuSel" })
@@ -1275,8 +1282,8 @@ local function apply_picker_highlights()
   vim.api.nvim_set_hl(0, "FunctionContextWinbarLine", { link = "LineNr" })
   vim.api.nvim_set_hl(0, "BufferTabActive", { link = "TabLineSel" })
   vim.api.nvim_set_hl(0, "BufferTabInactive", { link = "TabLine" })
-  vim.api.nvim_set_hl(0, "BufferTabErrorActive", { link = "DiagnosticError" })
-  vim.api.nvim_set_hl(0, "BufferTabErrorInactive", { link = "DiagnosticError" })
+  paint_foreground_on_background("BufferTabErrorActive", "DiagnosticError", "TabLineSel")
+  paint_foreground_on_background("BufferTabErrorInactive", "DiagnosticError", "TabLine")
   vim.api.nvim_set_hl(0, "BufferTabFill", { link = "TabLineFill" })
   vim.api.nvim_set_hl(0, "DiagnosticFloatingError", { link = "DiagnosticError" })
   vim.api.nvim_set_hl(0, "DiagnosticFloatingWarn", { link = "DiagnosticWarn" })
