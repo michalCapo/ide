@@ -1,9 +1,10 @@
 local git = require("views.git")
 local M = {}
 
-local S = { root = nil, tab = nil, panels = {}, order = { "files", "commits", "locals", "remotes", "stashes" },
+local COMPACT_COLUMNS = 100
+local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "remotes", "stashes", "commits" },
   active = 1, collapsed = {}, commit_files = nil, commits_show_changes = false, stash_files = nil, busy = false,
-  maximized_tab = nil, dashboard_tab = nil, dashboard_win = nil }
+  maximized_tab = nil, dashboard_tab = nil, dashboard_win = nil, compact = false, compact_win = nil }
 
 local ns = vim.api.nvim_create_namespace("lazyrepo")
 
@@ -184,6 +185,12 @@ local function focus(delta)
     local win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, p.buf)
     pcall(vim.api.nvim_win_set_cursor, win, { p.index, 0 })
+  elseif S.compact and S.compact_win and vim.api.nvim_win_is_valid(S.compact_win) then
+    for _, other in pairs(S.panels) do other.win = nil end
+    p.win = S.compact_win
+    vim.api.nvim_win_set_buf(S.compact_win, p.buf)
+    vim.api.nvim_set_current_win(S.compact_win)
+    pcall(vim.api.nvim_win_set_cursor, S.compact_win, { p.index, 0 })
   elseif vim.api.nvim_win_is_valid(p.win) then
     vim.api.nvim_set_current_win(p.win)
   end
@@ -487,7 +494,12 @@ local function toggle_maximize()
     if S.dashboard_tab and vim.api.nvim_tabpage_is_valid(S.dashboard_tab) then
       vim.api.nvim_set_current_tabpage(S.dashboard_tab)
       local active_panel = panel(S.order[S.active])
-      if active_panel and vim.api.nvim_win_is_valid(active_panel.win) then
+      if S.compact and S.compact_win and vim.api.nvim_win_is_valid(S.compact_win) then
+        for _, other in pairs(S.panels) do other.win = nil end
+        active_panel.win = S.compact_win
+        vim.api.nvim_win_set_buf(S.compact_win, active_panel.buf)
+        vim.api.nvim_set_current_win(S.compact_win)
+      elseif active_panel and active_panel.win and vim.api.nvim_win_is_valid(active_panel.win) then
         vim.api.nvim_set_current_win(active_panel.win)
       elseif S.dashboard_win and vim.api.nvim_win_is_valid(S.dashboard_win) then
         vim.api.nvim_set_current_win(S.dashboard_win)
@@ -547,12 +559,13 @@ end
 
 local function create_panel(name, title, win)
   local buf = vim.api.nvim_create_buf(false, true); vim.api.nvim_win_set_buf(win, buf)
-  vim.bo[buf].buftype = "nofile"; vim.bo[buf].bufhidden = "wipe"; vim.bo[buf].swapfile = false
+  vim.bo[buf].buftype = "nofile"; vim.bo[buf].bufhidden = "hide"; vim.bo[buf].swapfile = false
   vim.wo[win].number = false; vim.wo[win].cursorline = true; vim.wo[win].wrap = false
   S.panels[name] = { title = title, win = win, buf = buf, items = {}, index = 1 }; configure(buf)
 end
 
 local function equalize_columns()
+  if S.compact then return end
   local files = panel("files")
   local commits = panel("commits")
   local locals = panel("locals")
@@ -567,7 +580,73 @@ local function equalize_columns()
   local width = math.max(math.floor(available / 3), vim.o.winminwidth)
   local remainder = math.max(available - width * 3, 0)
   pcall(vim.api.nvim_win_set_width, files.win, width + (remainder >= 1 and 1 or 0))
-  pcall(vim.api.nvim_win_set_width, commits.win, width + (remainder >= 2 and 1 or 0))
+  pcall(vim.api.nvim_win_set_width, locals.win, width + (remainder >= 2 and 1 or 0))
+
+  local height = math.max(math.floor((vim.o.lines - vim.o.cmdheight - 3) / 3), vim.o.winminheight)
+  pcall(vim.api.nvim_win_set_height, locals.win, height)
+  pcall(vim.api.nvim_win_set_height, panel("remotes").win, height)
+end
+
+local function configure_panel_window(name, win)
+  local p = panel(name)
+  vim.api.nvim_win_set_buf(win, p.buf)
+  vim.wo[win].number = false
+  vim.wo[win].cursorline = true
+  vim.wo[win].wrap = false
+  p.win = win
+end
+
+local function compact_for_width(columns)
+  return columns < COMPACT_COLUMNS
+end
+
+local function apply_layout()
+  if not S.dashboard_tab or not vim.api.nvim_tabpage_is_valid(S.dashboard_tab) then return end
+  local compact = compact_for_width(vim.o.columns)
+  if compact == S.compact then
+    equalize_columns()
+    return
+  end
+
+  local original_tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_set_current_tabpage(S.dashboard_tab)
+  local base = S.dashboard_win
+  if not base or not vim.api.nvim_win_is_valid(base) then base = vim.api.nvim_get_current_win() end
+  vim.api.nvim_set_current_win(base)
+  vim.cmd("only")
+  for _, p in pairs(S.panels) do p.win = nil end
+
+  if compact then
+    S.compact = true
+    S.compact_win = base
+    S.dashboard_win = base
+    configure_panel_window(S.order[S.active], base)
+  else
+    S.compact = false
+    S.compact_win = nil
+    local left = base
+    vim.cmd("rightbelow vsplit"); local branches = vim.api.nvim_get_current_win()
+    vim.cmd("rightbelow vsplit"); local commits = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(branches)
+    vim.cmd("rightbelow split"); local remotes = vim.api.nvim_get_current_win()
+    vim.cmd("rightbelow split"); local stashes = vim.api.nvim_get_current_win()
+    configure_panel_window("files", left)
+    configure_panel_window("locals", branches)
+    configure_panel_window("remotes", remotes)
+    configure_panel_window("stashes", stashes)
+    configure_panel_window("commits", commits)
+    S.dashboard_win = panel(S.order[S.active]).win
+    equalize_columns()
+  end
+
+  local active = panel(S.order[S.active])
+  if active and active.win and vim.api.nvim_win_is_valid(active.win) then
+    vim.api.nvim_set_current_win(active.win)
+  end
+  decorate()
+  if original_tab ~= S.dashboard_tab and vim.api.nvim_tabpage_is_valid(original_tab) then
+    vim.api.nvim_set_current_tabpage(original_tab)
+  end
 end
 
 function M.launch()
@@ -578,19 +657,26 @@ function M.launch()
   vim.api.nvim_create_autocmd("ColorScheme", { callback = setup_highlights })
   vim.o.termguicolors = true; vim.o.laststatus = 2; vim.o.showtabline = 0
   vim.cmd("only"); local left = vim.api.nvim_get_current_win()
-  vim.cmd("rightbelow vsplit"); local middle = vim.api.nvim_get_current_win()
-  vim.cmd("rightbelow vsplit"); local right_local = vim.api.nvim_get_current_win()
-  vim.cmd("rightbelow split"); local right_remote = vim.api.nvim_get_current_win()
-  vim.cmd("rightbelow split"); local right_stash = vim.api.nvim_get_current_win()
-  create_panel("files", "Files", left); create_panel("commits", "Commits", middle)
-  create_panel("locals", "Local branches", right_local); create_panel("remotes", "Remote branches", right_remote); create_panel("stashes", "Stashes", right_stash)
+  vim.cmd("rightbelow vsplit"); local branches = vim.api.nvim_get_current_win()
+  vim.cmd("rightbelow vsplit"); local commits = vim.api.nvim_get_current_win()
+  vim.api.nvim_set_current_win(branches)
+  vim.cmd("rightbelow split"); local remotes = vim.api.nvim_get_current_win()
+  vim.cmd("rightbelow split"); local stashes = vim.api.nvim_get_current_win()
+  create_panel("files", "Files", left)
+  create_panel("locals", "Local branches", branches)
+  create_panel("remotes", "Remote branches", remotes)
+  create_panel("stashes", "Stashes", stashes)
+  create_panel("commits", "Commits", commits)
+  S.dashboard_tab = vim.api.nvim_get_current_tabpage()
+  S.dashboard_win = left
+  S.compact = false
   local layout_group = vim.api.nvim_create_augroup("LazyrepoLayout", { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
     group = layout_group,
-    callback = function() vim.schedule(equalize_columns) end,
+    callback = function() vim.schedule(apply_layout) end,
   })
-  equalize_columns()
-  vim.schedule(equalize_columns)
+  apply_layout()
+  vim.schedule(apply_layout)
   vim.api.nvim_set_current_win(left); S.active = 1; M.refresh()
 end
 

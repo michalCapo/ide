@@ -70,6 +70,10 @@ lazyrepo
 lazyrepo --help
 ```
 
+The dashboard uses Files, Local/Remote/Stash, and Commits columns. In terminals
+narrower than 100 columns it collapses to the active panel; use `h`/`l` or
+`Tab`/`Shift-Tab` to move between panels.
+
 Build settings can be overridden on the command line:
 
 ```sh

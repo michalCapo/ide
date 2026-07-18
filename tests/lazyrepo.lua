@@ -43,4 +43,7 @@ assert(commit_files, commit_err)
 assert(#commit_files == 1 and commit_files[1].path == "one.txt" and commit_files[1].status == "A")
 vim.fn.delete(test_root, "rf")
 
+local lazyrepo = require("views.lazyrepo")
+assert(vim.deep_equal(lazyrepo._state.order, { "files", "locals", "remotes", "stashes", "commits" }))
+
 print("lazyrepo parser tests: ok")

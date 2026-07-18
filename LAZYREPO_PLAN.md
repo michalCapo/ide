@@ -9,8 +9,11 @@ Create `lazyrepo`, a repository-wide Neovim TUI. Keep `lazydiff` as the focused 
 The dashboard has three columns:
 
 - Left: uncommitted file tree.
-- Middle: commits for the selected branch.
-- Right: stacked local-branch, remote-branch, and stash panels.
+- Middle: stacked local-branch, remote-branch, and stash panels.
+- Right: commits for the selected branch.
+
+Below 100 terminal columns, the dashboard collapses to the active panel while
+retaining panel navigation through `h`/`l` and `Tab`/`Shift-Tab`.
 
 Global keys: `h/l` switch panels, `j/k` move, `R` refresh, `p/P` pull/push, `?` help, and `q` quit.
 
