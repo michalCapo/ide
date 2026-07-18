@@ -132,6 +132,10 @@ function M.refs(root, remote)
   if not out then return nil, err end
   local refs = M.parse_refs(out)
   if not remote then
+    table.sort(refs, function(a, b)
+      if a.current ~= b.current then return a.current end
+      return a.name < b.name
+    end)
     for _, ref in ipairs(refs) do
       if ref.upstream ~= "" then
         local counts = M.git(root, { "rev-list", "--left-right", "--count", ref.name .. "..." .. ref.upstream })
