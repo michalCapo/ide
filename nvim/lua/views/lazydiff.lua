@@ -18,6 +18,8 @@ local state = {
   commit_history_index = nil,
   diff_cache = {},
   current_only = false,
+  revision = nil,
+  revision_parent = nil,
 }
 
 local namespace = vim.api.nvim_create_namespace("git_diff_view")
@@ -26,6 +28,7 @@ local KEYMAP_STATUSLINE = table.concat({
   " <Space> stage  d discard  a all  c commit  e edit  <Tab> mode ",
   " <leader>w wrap  R refresh  L gitui  q/Esc close ",
 })
+local READONLY_KEYMAP_STATUSLINE = " h/l change  j/k block  [c/]c change  n/N file edge  J/K file  <Tab> mode  <leader>w wrap  q/Esc close "
 
 local function apply_view_highlights()
   local dark = vim.o.background == "dark"
@@ -213,6 +216,8 @@ local function close()
   state.commit_history_index = nil
   state.diff_cache = {}
   state.current_only = false
+  state.revision = nil
+  state.revision_parent = nil
 
   if had_active_view then
     vim.schedule(function()
@@ -255,7 +260,7 @@ local function configure_diff_window(win)
   vim.wo[win].cursorline = true
   vim.wo[win].signcolumn = "no"
   vim.wo[win].foldcolumn = "0"
-  vim.wo[win].statusline = KEYMAP_STATUSLINE
+  vim.wo[win].statusline = state.revision and READONLY_KEYMAP_STATUSLINE or KEYMAP_STATUSLINE
 end
 
 local diff_end_pad_ns = vim.api.nvim_create_namespace("GitDiffViewEndPad")
@@ -899,17 +904,19 @@ local function configure_diff_keymaps(buf)
   vim.keymap.set("n", "[c", function() jump_change(true) end, vim.tbl_extend("force", opts, { desc = "Previous change" }))
   vim.keymap.set("n", "J", function() M.next_file() end, vim.tbl_extend("force", opts, { desc = "Next changed file" }))
   vim.keymap.set("n", "K", function() M.previous_file() end, vim.tbl_extend("force", opts, { desc = "Previous changed file" }))
-  vim.keymap.set("n", "d", M.discard_current_block, vim.tbl_extend("force", opts, { desc = "Discard current diff block" }))
-  vim.keymap.set("n", "<Space>", M.stage_current_block, vim.tbl_extend("force", opts, { desc = "Stage current diff block" }))
   vim.keymap.set("n", "<leader>w", function()
     vim.wo.wrap = not vim.wo.wrap
   end, vim.tbl_extend("force", opts, { desc = "Toggle line wrap" }))
-  vim.keymap.set("n", "a", M.stage_all, vim.tbl_extend("force", opts, { desc = "Stage/unstage all changes" }))
-  vim.keymap.set("n", "R", M.refresh, vim.tbl_extend("force", opts, { desc = "Refresh git diff view" }))
   vim.keymap.set("n", "L", M.open_gitui, vim.tbl_extend("force", opts, { desc = "Open gitui" }))
-  vim.keymap.set("n", "c", open_commit_prompt, vim.tbl_extend("force", opts, { desc = "Commit changes" }))
-  vim.keymap.set("n", "e", edit_current_file, vim.tbl_extend("force", opts, { desc = "Edit current file and close git diff view" }))
   vim.keymap.set("n", "<Tab>", M.toggle_current_only, vim.tbl_extend("force", opts, { desc = "Toggle diff/current file view" }))
+  if not state.revision then
+    vim.keymap.set("n", "d", M.discard_current_block, vim.tbl_extend("force", opts, { desc = "Discard current diff block" }))
+    vim.keymap.set("n", "<Space>", M.stage_current_block, vim.tbl_extend("force", opts, { desc = "Stage current diff block" }))
+    vim.keymap.set("n", "a", M.stage_all, vim.tbl_extend("force", opts, { desc = "Stage/unstage all changes" }))
+    vim.keymap.set("n", "R", M.refresh, vim.tbl_extend("force", opts, { desc = "Refresh git diff view" }))
+    vim.keymap.set("n", "c", open_commit_prompt, vim.tbl_extend("force", opts, { desc = "Commit changes" }))
+    vim.keymap.set("n", "e", edit_current_file, vim.tbl_extend("force", opts, { desc = "Edit current file and close git diff view" }))
+  end
 end
 
 local function hide_tabline()
@@ -963,20 +970,32 @@ local function file_lines_from_head(path)
   return vim.split(output, "\n", { plain = true })
 end
 
+local function file_lines_from_revision(path)
+  local output = git({ "show", state.revision .. ":" .. path })
+  if not output then return {} end
+  if output:find("\0", 1, true) then return binary_file_placeholder(path) end
+  output = output:gsub("\n$", "")
+  return output == "" and {} or vim.split(output, "\n", { plain = true })
+end
+
 local function diff_hunks(file)
   if file.status:find("%?") then
     return {}
   end
 
-  local output = git({
+  local args = {
     "diff",
     "--no-ext-diff",
     "--no-color",
     "--unified=0",
-    "HEAD",
-    "--",
-    file.path,
-  })
+  }
+  if state.revision then
+    vim.list_extend(args, { state.revision_parent, state.revision })
+  else
+    args[#args + 1] = "HEAD"
+  end
+  vim.list_extend(args, { "--", file.path })
+  local output = git(args)
   if not output or output == "" then
     return {}
   end
@@ -1178,7 +1197,9 @@ local function add_changed_group(result, deletes, adds, metadata)
 end
 
 local function build_full_file_diff(file)
-  local worktree_lines = file.status:find("D") and {} or file_lines_from_worktree(file.path)
+  local worktree_lines = file.status:find("D") and {}
+    or state.revision and file_lines_from_revision(file.path)
+    or file_lines_from_worktree(file.path)
   local result = {
     lines = {},
     line_marks = {},
@@ -1273,7 +1294,9 @@ local function build_full_file_diff(file)
 end
 
 local function build_current_file_view(file, diff_result)
-  local lines = file.status:find("D") and {} or file_lines_from_worktree(file.path)
+  local lines = file.status:find("D") and {}
+    or state.revision and file_lines_from_revision(file.path)
+    or file_lines_from_worktree(file.path)
   local result = {
     lines = lines,
     line_marks = {},
@@ -1567,7 +1590,26 @@ function M.open(opts)
   state.root = root
   state.current_only = load_current_only(root)
 
-  local files, files_err = changed_files()
+  if type(opts.revision) == "string" and opts.revision ~= "" then
+    state.revision = opts.revision
+    local ancestry, ancestry_err = git({ "rev-list", "--parents", "-n", "1", state.revision })
+    if not ancestry then
+      vim.notify("Git diff view: " .. ancestry_err, vim.log.levels.ERROR)
+      return
+    end
+    local parts = vim.split(vim.trim(ancestry), "%s+")
+    state.revision_parent = parts[2]
+    if not state.revision_parent then
+      local empty_tree, empty_err = git({ "hash-object", "-t", "tree", "--stdin" }, { stdin = "" })
+      if not empty_tree then
+        vim.notify("Git diff view: " .. empty_err, vim.log.levels.ERROR)
+        return
+      end
+      state.revision_parent = vim.trim(empty_tree)
+    end
+  end
+
+  local files, files_err = opts.files and vim.deepcopy(opts.files) or changed_files()
   if not files then
     vim.notify("Git diff view: " .. files_err, vim.log.levels.ERROR)
     return

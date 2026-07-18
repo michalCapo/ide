@@ -313,15 +313,9 @@ end
 
 local function open_diff(path, revision)
   if revision then
-    local out, err = git.diff_text(S.root, revision, path)
-    if not out then notify_error(err); return end
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(out, "\n", { plain = true }))
-    vim.bo[buf].filetype = "diff"; vim.bo[buf].modifiable = false
-    vim.cmd("tabnew")
-    vim.api.nvim_set_current_buf(buf)
-    vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, silent = true })
-    vim.keymap.set("n", "<Esc>", "<cmd>tabclose<cr>", { buffer = buf, silent = true })
+    local files, err = git.changed_paths(S.root, revision)
+    if not files then notify_error(err); return end
+    require("views.lazydiff").open({ revision = revision, files = files, focus_file = path })
     return
   end
   require("views.lazydiff").open({ allow_empty = true, focus_file = path })
