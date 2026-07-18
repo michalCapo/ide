@@ -85,6 +85,19 @@ function M.tree(files, collapsed)
     end
     node.children[file.path] = file
   end
+  local function aggregate(node)
+    if node.kind == "file" then return node.staged, node.unstaged, node.conflict end
+    local staged, unstaged, conflict = false, false, false
+    for _, child in pairs(node.children or {}) do
+      local child_staged, child_unstaged, child_conflict = aggregate(child)
+      staged = staged or child_staged == true
+      unstaged = unstaged or child_unstaged == true
+      conflict = conflict or child_conflict == true
+    end
+    node.staged, node.unstaged, node.conflict = staged, unstaged, conflict
+    return staged, unstaged, conflict
+  end
+  aggregate(root)
   local rows = {}
   local function visit(node, depth)
     local children = {}

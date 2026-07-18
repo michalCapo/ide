@@ -1588,7 +1588,7 @@ function M.open(opts)
   end
 end
 
-local function setup_standalone_ui()
+function M.setup_standalone_ui()
   vim.o.termguicolors = true
   vim.o.showtabline = 0
   vim.o.laststatus = 2
@@ -1635,7 +1635,7 @@ end
 function M.launch(opts)
   opts = opts or {}
   vim.g.lazydiff_standalone = true
-  setup_standalone_ui()
+  M.setup_standalone_ui()
 
   vim.schedule(function()
     local tabs_before = #vim.api.nvim_list_tabpages()

@@ -12,9 +12,16 @@ assert(files[3].path == "renamed.txt" and files[3].old_path == "old name.txt" an
 
 local rows = git.tree(files, {})
 assert(rows[1].kind == "folder" and rows[1].path == "dir")
+assert(rows[1].unstaged == true and rows[1].staged == false)
 assert(rows[2].path == "dir/new file.txt")
 local collapsed = git.tree(files, { dir = true })
 assert(#collapsed == 3)
+
+local mixed_tree = git.tree({
+  { kind = "file", path = "mixed/staged.txt", staged = true, unstaged = false },
+  { kind = "file", path = "mixed/unstaged.txt", staged = false, unstaged = true },
+}, {})
+assert(mixed_tree[1].kind == "folder" and mixed_tree[1].staged and mixed_tree[1].unstaged)
 
 local refs = git.parse_refs("main\0abc\0origin/main\0*\nfeature\0def\0\0 \n")
 assert(#refs == 2 and refs[1].current and refs[1].upstream == "origin/main")

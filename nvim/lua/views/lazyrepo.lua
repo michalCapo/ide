@@ -5,6 +5,26 @@ local S = { root = nil, tab = nil, panels = {}, order = { "files", "commits", "l
   active = 1, collapsed = {}, commit_files = nil, commits_show_changes = false, stash_files = nil, busy = false,
   maximized_tab = nil, dashboard_tab = nil, dashboard_win = nil }
 
+local ns = vim.api.nvim_create_namespace("lazyrepo")
+
+local function setup_highlights()
+  local hl = vim.api.nvim_set_hl
+  hl(0, "LazyrepoStaged", { link = "Added" })
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  hl(0, "LazyrepoUnstaged", { fg = vim.o.background == "light" and 0x000000 or normal.fg })
+  hl(0, "LazyrepoMixed", { link = "DiagnosticWarn" })
+  hl(0, "LazyrepoConflict", { link = "DiagnosticError" })
+  hl(0, "LazyrepoFolder", { link = "Directory" })
+  hl(0, "LazyrepoHash", { link = "Constant" })
+  hl(0, "LazyrepoDate", { link = "Special" })
+  hl(0, "LazyrepoMuted", { link = "Comment" })
+  local added = vim.api.nvim_get_hl(0, { name = "Added", link = false })
+  local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
+  hl(0, "LazyrepoCurrent", { fg = added.fg, bold = true })
+  hl(0, "LazyrepoTitle", { fg = comment.fg })
+  hl(0, "LazyrepoTitleActive", { fg = added.fg, bold = true })
+end
+
 local function notify_error(message)
   if message and message ~= "" then vim.notify(message, vim.log.levels.ERROR, { title = "lazyrepo: Git error" }) end
 end
@@ -15,37 +35,88 @@ local function selected(name)
   return p and p.items[p.index]
 end
 
+-- Returns the rendered line plus highlight spans: { group, start_col, end_col } (byte offsets, -1 = eol).
 local function line_for(name, item)
-  if item.placeholder then return "  " .. item.placeholder end
-  if name == "files" or name == "commits" and S.commit_files or name == "stashes" and S.stash_files then
+  if item.placeholder then return "  " .. item.placeholder, { { "LazyrepoMuted", 0, -1 } } end
+  if item.kind then
     local indent = string.rep("  ", item.depth or 0)
-    if item.kind == "folder" then return indent .. (S.collapsed[item.path] and "▸ " or "▾ ") .. item.name end
-    return indent .. (item.status or "  ") .. " " .. item.path
+    if item.kind == "folder" then
+      local group = item.conflict and "LazyrepoConflict"
+        or item.staged and item.unstaged and "LazyrepoMixed"
+        or item.staged and "LazyrepoStaged"
+        or item.unstaged and "LazyrepoUnstaged"
+        or "LazyrepoFolder"
+      return indent .. (S.collapsed[item.path] and "▸ " or "▾ ") .. item.name, { { group, #indent, -1 } }
+    end
+    local status = item.status or "  "
+    local group = item.conflict and "LazyrepoConflict"
+      or status == "??" and "LazyrepoUnstaged"
+      or item.staged and item.unstaged and "LazyrepoMixed"
+      or (item.staged and not item.unstaged or item.staged == nil) and "LazyrepoStaged"
+      or "LazyrepoUnstaged"
+    return indent .. status .. " " .. (item.path:match("[^/]+$") or item.path), { { group, #indent, -1 } }
   elseif name == "commits" then
-    return string.format("%s %s %s", item.short, item.date, item.subject)
+    return string.format("%s %s %s", item.short, item.date, item.subject),
+      { { "LazyrepoHash", 0, #item.short }, { "LazyrepoDate", #item.short + 1, #item.short + 1 + #item.date } }
   elseif name == "locals" then
-    return (item.current and "* " or "  ") .. item.name .. (item.upstream ~= "" and " → " .. item.upstream or "")
-  elseif name == "remotes" then return "  " .. item.name
+    local head = (item.current and "* " or "  ") .. item.name
+    local line = head .. (item.upstream ~= "" and " → " .. item.upstream or "")
+    local spans = {}
+    if item.current then spans[#spans + 1] = { "LazyrepoCurrent", 0, #head } end
+    if item.upstream ~= "" then spans[#spans + 1] = { "LazyrepoMuted", #head, -1 } end
+    return line, spans
+  elseif name == "remotes" then return "  " .. item.name, {}
   end
-  return string.format("%s %s", item.ref, item.subject)
+  return string.format("%s %s", item.ref, item.subject), { { "LazyrepoHash", 0, #item.ref } }
+end
+
+local function decorate()
+  for _, name in ipairs(S.order) do
+    local p = panel(name)
+    if p and vim.api.nvim_buf_is_valid(p.buf) then
+      local active = S.order[S.active] == name
+      local title_hl = active and "LazyrepoTitleActive" or "LazyrepoTitle"
+      local count = p.items and #p.items > 0 and not (p.items[1] or {}).placeholder
+        and string.format("%d of %d ", p.index or 1, #p.items) or ""
+      local bar = " " .. p.title:gsub("%%", "%%%%") .. (S.busy and "  [working…]" or "") .. " %=" .. count
+      for _, win in ipairs(vim.fn.win_findbuf(p.buf)) do
+        if vim.api.nvim_win_is_valid(win) then
+          vim.wo[win].winbar = bar
+          vim.wo[win].winhighlight = "WinBar:" .. title_hl .. ",WinBarNC:" .. title_hl
+        end
+      end
+    end
+  end
 end
 
 local function render(name)
   local p = panel(name)
   if not p or not vim.api.nvim_buf_is_valid(p.buf) then return end
-  local lines = {}
-  for _, item in ipairs(p.items) do lines[#lines + 1] = line_for(name, item) end
-  if #lines == 0 then lines, p.items = { "  (empty)" }, { { placeholder = "(empty)" } } end
+  local lines, spans = {}, {}
+  for _, item in ipairs(p.items) do
+    local line, line_spans = line_for(name, item)
+    lines[#lines + 1] = line
+    spans[#lines] = line_spans
+  end
+  if #lines == 0 then
+    lines, p.items = { "  (empty)" }, { { placeholder = "(empty)" } }
+    spans[1] = { { "LazyrepoMuted", 0, -1 } }
+  end
   p.index = math.max(1, math.min(p.index or 1, #p.items))
   vim.bo[p.buf].modifiable = true
   vim.api.nvim_buf_set_lines(p.buf, 0, -1, false, lines)
   vim.bo[p.buf].modifiable = false
-  for _, win in ipairs(vim.fn.win_findbuf(p.buf)) do
-    if vim.api.nvim_win_is_valid(win) then
-      pcall(vim.api.nvim_win_set_cursor, win, { p.index, 0 })
-      vim.wo[win].winbar = " " .. p.title .. (S.busy and "  [working…]" or "") .. " "
+  vim.api.nvim_buf_clear_namespace(p.buf, ns, 0, -1)
+  for row, line_spans in pairs(spans) do
+    for _, span in ipairs(line_spans) do
+      pcall(vim.api.nvim_buf_set_extmark, p.buf, ns, row - 1, span[2],
+        { end_col = span[3] == -1 and #lines[row] or span[3], hl_group = span[1] })
     end
   end
+  for _, win in ipairs(vim.fn.win_findbuf(p.buf)) do
+    if vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_set_cursor, win, { p.index, 0 }) end
+  end
+  decorate()
 end
 
 local function preserve(p, items, key)
@@ -99,10 +170,10 @@ local function focus(delta)
     local win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, p.buf)
     pcall(vim.api.nvim_win_set_cursor, win, { p.index, 0 })
-    vim.wo[win].winbar = " " .. p.title .. (S.busy and "  [working…]" or "") .. " "
   elseif vim.api.nvim_win_is_valid(p.win) then
     vim.api.nvim_set_current_win(p.win)
   end
+  decorate()
 end
 
 local function move(delta)
@@ -174,19 +245,21 @@ local function ignore_selection()
     return
   end
 
-  local rule = "/" .. item.path .. (item.kind == "folder" and "/" or "")
-  local ignore_path = S.root .. "/.gitignore"
-  local lines = vim.fn.filereadable(ignore_path) == 1 and vim.fn.readfile(ignore_path) or {}
-  local exists = false
-  for _, line in ipairs(lines) do if line == rule then exists = true; break end end
-  if not exists then
-    local ok, write_err = pcall(vim.fn.writefile, { rule }, ignore_path, "a")
-    if not ok then notify_error("Could not update .gitignore: " .. tostring(write_err)); return end
-  end
+  confirm("Ignore and untrack " .. item.path .. "?", function()
+    local rule = "/" .. item.path .. (item.kind == "folder" and "/" or "")
+    local ignore_path = S.root .. "/.gitignore"
+    local lines = vim.fn.filereadable(ignore_path) == 1 and vim.fn.readfile(ignore_path) or {}
+    local exists = false
+    for _, line in ipairs(lines) do if line == rule then exists = true; break end end
+    if not exists then
+      local ok, write_err = pcall(vim.fn.writefile, { rule }, ignore_path, "a")
+      if not ok then notify_error("Could not update .gitignore: " .. tostring(write_err)); return end
+    end
 
-  local _, err = git.git(S.root, { "rm", "--cached", "-r", "--ignore-unmatch", "--", item.path })
-  if err then notify_error(err) end
-  M.refresh()
+    local _, err = git.git(S.root, { "rm", "--cached", "-r", "--ignore-unmatch", "--", item.path })
+    if err then notify_error(err) end
+    M.refresh()
+  end)
 end
 
 local function commit()
@@ -273,7 +346,14 @@ end
 
 local function branch_op(kind)
   local item = selected(); if not item or not item.name then return end
-  run(kind == "merge" and { "merge", item.name } or { "rebase", item.name }, kind, true)
+  local action = function()
+    run(kind == "merge" and { "merge", item.name } or { "rebase", item.name }, kind, true)
+  end
+  if kind == "rebase" then
+    confirm("Rebase the current branch onto " .. item.name .. "? This rewrites local history.", action)
+  else
+    action()
+  end
 end
 
 local function delete_branch()
@@ -322,7 +402,17 @@ local function conflict_action(action)
         git_dir = vim.trim(git_dir); if git_dir:sub(1, 1) ~= "/" then git_dir = S.root .. "/" .. git_dir end
         if vim.uv.fs_stat(git_dir .. "/" .. path) then
           if action == "skip" and operation ~= "rebase" then notify_error("Skip is only available during rebase"); return end
-          local args = { operation }; vim.list_extend(args, map[action]); run(args, operation .. " " .. action, true); return
+          local execute = function()
+            local args = { operation }; vim.list_extend(args, map[action]); run(args, operation .. " " .. action, true)
+          end
+          if action == "abort" then
+            confirm("Abort the current " .. operation .. " and discard its in-progress changes?", execute)
+          elseif action == "skip" then
+            confirm("Skip the current rebase commit? Its changes will be omitted.", execute)
+          else
+            execute()
+          end
+          return
         end
       end
     end
@@ -333,7 +423,13 @@ end
 local function stash_op(op)
   local item = selected("stashes"); if not item or not item.ref then return end
   local action = function() run({ "stash", op, item.ref }, "Stash " .. op, true) end
-  if op == "drop" then confirm("Drop " .. item.ref .. "?", action) else action() end
+  if op == "drop" then
+    confirm("Permanently drop " .. item.ref .. "?", action)
+  elseif op == "pop" then
+    confirm("Pop " .. item.ref .. "? The stash is removed after a successful apply.", action)
+  else
+    action()
+  end
 end
 
 local function push()
@@ -426,6 +522,9 @@ end
 function M.launch()
   S.root = git.root()
   if not S.root then notify_error("not inside a Git repository"); vim.cmd("cq"); return end
+  pcall(function() require("views.lazydiff").setup_standalone_ui() end)
+  setup_highlights()
+  vim.api.nvim_create_autocmd("ColorScheme", { callback = setup_highlights })
   vim.o.termguicolors = true; vim.o.laststatus = 2; vim.o.showtabline = 0
   vim.cmd("only"); local left = vim.api.nvim_get_current_win()
   vim.cmd("rightbelow vsplit"); local middle = vim.api.nvim_get_current_win()
