@@ -552,6 +552,24 @@ local function create_panel(name, title, win)
   S.panels[name] = { title = title, win = win, buf = buf, items = {}, index = 1 }; configure(buf)
 end
 
+local function equalize_columns()
+  local files = panel("files")
+  local commits = panel("commits")
+  local locals = panel("locals")
+  if not files or not commits or not locals
+      or not vim.api.nvim_win_is_valid(files.win)
+      or not vim.api.nvim_win_is_valid(commits.win)
+      or not vim.api.nvim_win_is_valid(locals.win) then
+    return
+  end
+
+  local available = vim.o.columns - 2
+  local width = math.max(math.floor(available / 3), vim.o.winminwidth)
+  local remainder = math.max(available - width * 3, 0)
+  pcall(vim.api.nvim_win_set_width, files.win, width + (remainder >= 1 and 1 or 0))
+  pcall(vim.api.nvim_win_set_width, commits.win, width + (remainder >= 2 and 1 or 0))
+end
+
 function M.launch()
   S.root = git.root()
   if not S.root then notify_error("not inside a Git repository"); vim.cmd("cq"); return end
@@ -566,6 +584,13 @@ function M.launch()
   vim.cmd("rightbelow split"); local right_stash = vim.api.nvim_get_current_win()
   create_panel("files", "Files", left); create_panel("commits", "Commits", middle)
   create_panel("locals", "Local branches", right_local); create_panel("remotes", "Remote branches", right_remote); create_panel("stashes", "Stashes", right_stash)
+  local layout_group = vim.api.nvim_create_augroup("LazyrepoLayout", { clear = true })
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = layout_group,
+    callback = function() vim.schedule(equalize_columns) end,
+  })
+  equalize_columns()
+  vim.schedule(equalize_columns)
   vim.api.nvim_set_current_win(left); S.active = 1; M.refresh()
 end
 
