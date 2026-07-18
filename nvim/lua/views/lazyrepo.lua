@@ -59,8 +59,9 @@ local function line_for(name, item)
       or "LazyrepoUnstaged"
     return indent .. status .. " " .. (item.path:match("[^/]+$") or item.path), { { group, #indent, -1 } }
   elseif name == "commits" then
-    return string.format("%s  %s  %s", item.author, item.date, item.subject),
-      { { "LazyrepoAuthor", 0, #item.author }, { "LazyrepoDate", #item.author + 2, #item.author + 2 + #item.date } }
+    local initials = item.initials or "?"
+    return string.format("%s  %s  %s", initials, item.date, item.subject),
+      { { "LazyrepoAuthor", 0, #initials }, { "LazyrepoDate", #initials + 2, #initials + 2 + #item.date } }
   elseif name == "locals" then
     local head = (item.current and "* " or "  ") .. item.name
     local line = head

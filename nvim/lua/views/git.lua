@@ -152,7 +152,14 @@ function M.commits(root, ref, limit)
   local commits = {}
   for line in out:gmatch("[^\n]+") do
     local oid, short, date, author, subject = line:match("^(.-)%z(.-)%z(.-)%z(.-)%z(.*)$")
-    if oid then commits[#commits + 1] = { oid = oid, short = short, date = date, author = author, subject = subject } end
+    if oid then
+      local initials = {}
+      for _, part in ipairs(vim.split(vim.trim(author), "%s+")) do
+        if part ~= "" then initials[#initials + 1] = vim.fn.toupper(vim.fn.strcharpart(part, 0, 1)) end
+      end
+      commits[#commits + 1] = { oid = oid, short = short, date = date, author = author,
+        initials = #initials > 0 and table.concat(initials) or "?", subject = subject }
+    end
   end
   return commits
 end
