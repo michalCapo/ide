@@ -7811,7 +7811,7 @@ end
 
 setup_debugging()
 
-local git_diff_view = require("views.git_diff")
+local git_diff_view = require("views.lazydiff")
 require("views.search")
 
 local function git_blame_current_line()
