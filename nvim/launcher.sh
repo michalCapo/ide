@@ -22,7 +22,7 @@ export NVIM_PORTABLE_INIT="$APP_DIR/config/init.lua"
 if [ -x "$SELF_DIR/lazygit" ]; then
   export NVIM_PORTABLE_LAZYGIT="$SELF_DIR/lazygit"
 fi
-if [ "${NVIM_PORTABLE_LAZYDIFF:-}" = 1 ]; then
+if [ "${NVIM_PORTABLE_LAZYDIFF:-}" = 1 ] || [ "${NVIM_PORTABLE_LAZYREPO:-}" = 1 ]; then
   exec "$APP_DIR/nvim/bin/nvim" -u NORC --cmd "set runtimepath^=$APP_DIR/config" "$@"
 fi
 exec "$APP_DIR/nvim/bin/nvim" -u "$NVIM_PORTABLE_INIT" "$@"

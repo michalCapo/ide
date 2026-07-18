@@ -2,7 +2,7 @@
 
 Personal Neovim, Lazygit, and Vifm configuration packaged as portable Linux
 commands. The build bundles each upstream executable with its configuration and
-also creates the `lazydiff` companion command.
+also creates the `lazydiff` and `lazyrepo` companion commands.
 
 ## Included commands
 
@@ -10,6 +10,7 @@ also creates the `lazydiff` companion command.
 | --- | --- | --- |
 | `nvim` | yes | yes |
 | `lazydiff` | yes | yes |
+| `lazyrepo` | yes | yes |
 | `lazygit` | yes | yes |
 | `vifm` | yes | no |
 
@@ -61,6 +62,13 @@ lazydiff --help
 
 Running `lazydiff` without arguments prints its usage. Pass one `FILE` argument
 to launch the viewer. Use `--` before a file whose name begins with `-`.
+
+Open the repository-wide dashboard from anywhere inside a Git repository:
+
+```sh
+lazyrepo
+lazyrepo --help
+```
 
 Build settings can be overridden on the command line:
 

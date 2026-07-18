@@ -12,10 +12,12 @@ RELEASE_DIR := $(DIST_DIR)/release
 
 NVIM_NAME := nvim
 LAZYDIFF_NAME := lazydiff
+LAZYREPO_NAME := lazyrepo
 LAZYGIT_NAME := lazygit
 VIFM_NAME := vifm
 NVIM_OUTPUT := $(DIST_DIR)/$(NVIM_NAME)
 LAZYDIFF_OUTPUT := $(DIST_DIR)/$(LAZYDIFF_NAME)
+LAZYREPO_OUTPUT := $(DIST_DIR)/$(LAZYREPO_NAME)
 LAZYGIT_OUTPUT := $(DIST_DIR)/$(LAZYGIT_NAME)
 VIFM_OUTPUT := $(DIST_DIR)/$(VIFM_NAME)
 
@@ -50,7 +52,7 @@ all: help
 help:
 	@printf '%s\n' \
 	  'Available commands:' \
-	  '  make build    Build portable nvim, lazydiff, and lazygit; also vifm on x86_64' \
+	  '  make build    Build portable nvim, lazydiff, lazyrepo, and lazygit; also vifm on x86_64' \
 	  '  make update   Refresh cached downloads for the selected architecture' \
 	  '  make install  Build and install commands under ~/.local/bin' \
 	  '  make publish  Build and publish the next GitHub release' \
@@ -163,6 +165,9 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	sed 's/@INSTALL_NAME@/$(INSTALL_NAME)/g' "$(NVIM_SOURCE_DIR)/lazydiff.sh" >"$(LAZYDIFF_OUTPUT)"
 	chmod 755 "$(LAZYDIFF_OUTPUT)"
 	echo "Built $(LAZYDIFF_OUTPUT)"
+	sed 's/@INSTALL_NAME@/$(INSTALL_NAME)/g' "$(NVIM_SOURCE_DIR)/lazyrepo.sh" >"$(LAZYREPO_OUTPUT)"
+	chmod 755 "$(LAZYREPO_OUTPUT)"
+	echo "Built $(LAZYREPO_OUTPUT)"
 
 	if [ "$(ARCH)" = x86_64 ]; then
 	  $(MAKE) "$(VIFM_APPIMAGE)"
@@ -195,10 +200,12 @@ install: build
 	install -d "$(BINDIR)"
 	install -m 755 "$(NVIM_OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
 	install -m 755 "$(LAZYDIFF_OUTPUT)" "$(BINDIR)/$(LAZYDIFF_NAME)"
+	install -m 755 "$(LAZYREPO_OUTPUT)" "$(BINDIR)/$(LAZYREPO_NAME)"
 	install -m 755 "$(LAZYGIT_OUTPUT)" "$(BINDIR)/$(LAZYGIT_NAME)"
 	if [ "$(ARCH)" = x86_64 ]; then install -m 755 "$(VIFM_OUTPUT)" "$(BINDIR)/$(VIFM_NAME)"; fi
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
+	echo "Installed $(BINDIR)/$(LAZYREPO_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYGIT_NAME)"
 	if [ "$(ARCH)" = x86_64 ]; then echo "Installed $(BINDIR)/$(VIFM_NAME)"; fi
 	rm -rf "$(NVIM_PORTABLE_CACHE_DIR)" "$(LAZYGIT_PORTABLE_CACHE_DIR)" "$(VIFM_PORTABLE_CACHE_DIR)"
@@ -212,9 +219,9 @@ release-assets:
 	for ARCH_VALUE in x86_64 arm64; do
 	  $(MAKE) build ARCH="$$ARCH_VALUE"
 	  if [ "$$ARCH_VALUE" = x86_64 ]; then
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYGIT_NAME)" "$(VIFM_NAME)"
+	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYGIT_NAME)" "$(VIFM_NAME)"
 	  else
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYGIT_NAME)"
+	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYGIT_NAME)"
 	  fi
 	done
 	rm -rf "$(RELEASE_DIR)"
@@ -236,8 +243,8 @@ release-assets:
 	done
 	[ "$$(uname -s)" = Linux ] || fail "unsupported operating system: $$(uname -s)"
 	case $$(uname -m) in
-	  x86_64|amd64) arch=x86_64; commands='nvim lazydiff lazygit vifm' ;;
-	  aarch64|arm64) arch=arm64; commands='nvim lazydiff lazygit' ;;
+	  x86_64|amd64) arch=x86_64; commands='nvim lazydiff lazyrepo lazygit vifm' ;;
+	  aarch64|arm64) arch=arm64; commands='nvim lazydiff lazyrepo lazygit' ;;
 	  *) fail "unsupported Linux architecture: $$(uname -m)" ;;
 	esac
 	asset="nvim-linux-$$arch.tar.gz"
