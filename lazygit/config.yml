@@ -16,6 +16,8 @@ gui:
       - '#242a32'
   wrapLinesInStagingView: false
   wrapLinesInCommitMessage: false
+  # Keep hunk staging as the default and suppress the hunk-mode notice.
+  useHunkModeInStagingView: true
   # Start Lazygit in the default multi-panel layout.
   # Toggle/cycle inside Lazygit with `+` / `_` (or `-`) if needed.
   screenMode: normal
@@ -50,12 +52,12 @@ keybinding:
     checkoutPreviousBranch: <disabled>
 
 customCommands:
-  # Review changes in the Neovim diff viewer (lazydiff) instead of lazygit's
-  # built-in diff panels. Enter on a file opens just that file's diff
-  # full-width (q/Esc returns to lazygit; e closes both views and edits the
-  # selected file in the parent Neovim).
+  # Review changes in the Neovim diff viewer (lazydiff) with `o`, while Enter
+  # keeps Lazygit's built-in behavior. The selected file's diff opens full-width
+  # (q/Esc returns to lazygit; e closes both views and edits the selected file
+  # in the parent Neovim).
   # On a directory .SelectedFile is nil, so run a no-op instead of erroring.
-  - key: '<enter>'
+  - key: 'o'
     context: 'files'
     description: 'Review file in lazydiff'
     command: '{{if .SelectedFile}}lazydiff {{.SelectedFile.Name | quote}}{{else}}true{{end}}'

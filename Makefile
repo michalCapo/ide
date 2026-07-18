@@ -145,7 +145,7 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	tar -xzf "$(LAZYGIT_ARCHIVE)" -C "$$WORK/lazygit-unpacked"
 	test -x "$$WORK/lazygit-unpacked/lazygit" || { echo 'Lazygit archive does not contain lazygit' >&2; exit 1; }
 	mv "$$WORK/lazygit-unpacked/lazygit" "$$WORK/lazygit-payload/lazygit"
-	cp "$(LAZYGIT_SOURCE_DIR)/config.yml" "$(LAZYGIT_SOURCE_DIR)/light-theme.yml" "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" "$$WORK/lazygit-payload/config/"
+	cp "$(LAZYGIT_SOURCE_DIR)/config.yml" "$(LAZYGIT_SOURCE_DIR)/light-theme.yml" "$(LAZYGIT_SOURCE_DIR)/state.yml" "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" "$$WORK/lazygit-payload/config/"
 	chmod 755 "$$WORK/lazygit-payload/config/nvim-edit-parent"
 	LAZYGIT_CONFIG_HASH=$$(cd "$$WORK/lazygit-payload/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
 	LAZYGIT_HASH=$$(sha256sum "$(LAZYGIT_ARCHIVE)" | cut -d' ' -f1)

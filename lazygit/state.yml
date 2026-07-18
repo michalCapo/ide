@@ -1,0 +1,3 @@
+# The portable payload has isolated state. Suppress Lazygit's one-time hunk
+# staging migration hint; hunk mode remains enabled in config.yml.
+didshowhunkstaginghint: true
