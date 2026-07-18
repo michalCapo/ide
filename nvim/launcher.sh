@@ -5,6 +5,10 @@ PAYLOAD_ID='@PAYLOAD_ID@'
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CACHE_BASE=${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}
 APP_DIR="$CACHE_BASE/nvim-portable/$PAYLOAD_ID"
+PORTABLE_VIEWER=0
+if [ "${NVIM_PORTABLE_LAZYDIFF:-}" = 1 ] || [ "${NVIM_PORTABLE_LAZYREPO:-}" = 1 ]; then
+  PORTABLE_VIEWER=1
+fi
 
 if [ ! -x "$APP_DIR/nvim/bin/nvim" ]; then
   command -v tar >/dev/null 2>&1 || { echo 'nvim-portable requires tar to unpack itself' >&2; exit 127; }
@@ -25,7 +29,8 @@ fi
 if [ -x "$SELF_DIR/lazyrepo" ]; then
   export NVIM_PORTABLE_LAZYREPO="$SELF_DIR/lazyrepo"
 fi
-if [ "${NVIM_PORTABLE_LAZYDIFF:-}" = 1 ] || [ "${NVIM_PORTABLE_LAZYREPO:-}" = 1 ]; then
+unset VIM VIMRUNTIME
+if [ "$PORTABLE_VIEWER" = 1 ]; then
   exec "$APP_DIR/nvim/bin/nvim" -u NORC --cmd "set runtimepath^=$APP_DIR/config" "$@"
 fi
 exec "$APP_DIR/nvim/bin/nvim" -u "$NVIM_PORTABLE_INIT" "$@"

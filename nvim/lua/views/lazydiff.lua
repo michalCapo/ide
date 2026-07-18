@@ -660,6 +660,19 @@ local function edit_current_file()
 
   local full_path = state.root .. "/" .. file.path
 
+  -- When Lazyrepo is embedded in a parent Neovim, close the dashboard process
+  -- and let the parent editor open the selected diff location.
+  local lazyrepo_handoff = vim.env.LAZYREPO_NVIM_EDIT_REQUEST
+  if lazyrepo_handoff and lazyrepo_handoff ~= "" then
+    local ok = pcall(vim.fn.writefile, { full_path, tostring(row), tostring(col) }, lazyrepo_handoff)
+    if not ok then
+      vim.notify("Git diff view: could not hand file to parent editor", vim.log.levels.ERROR)
+      return
+    end
+    vim.cmd("qa!")
+    return
+  end
+
   -- Standalone lazydiff runs with -u NORC for a lightweight review UI. Hand
   -- edits back to its wrapper so it can replace this process with the user's
   -- normal Neovim.

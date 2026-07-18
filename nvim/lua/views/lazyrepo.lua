@@ -349,6 +349,25 @@ local function enter()
   end
 end
 
+local function edit_file()
+  if S.order[S.active] ~= "files" then return end
+  local item = selected("files")
+  if not item or item.placeholder or item.kind == "folder" or not item.path then return end
+
+  local handoff = vim.env.LAZYREPO_NVIM_EDIT_REQUEST
+  if not handoff or handoff == "" then
+    notify_error("No parent editor handoff is available")
+    return
+  end
+
+  local ok = pcall(vim.fn.writefile, { S.root .. "/" .. item.path, "1", "0" }, handoff)
+  if not ok then
+    notify_error("Could not hand file to editor")
+    return
+  end
+  vim.cmd("qa!")
+end
+
 local function checkout()
   local name, item = S.order[S.active], selected(); if not item or not item.name then return end
   if name == "locals" then run({ "switch", item.name }, "Checkout", false)
@@ -457,7 +476,7 @@ local function push()
 end
 
 local function help()
-  vim.notify("h/l or Tab/S-Tab panels · j/k move · - maximize panel · Enter open · Space stage/checkout/apply · a stage all · i ignore · d discard/drop · c commit · s stash · M merge · r rebase · g pop · p pull · P push · R refresh · Esc back · q quit", vim.log.levels.INFO, { title = "lazyrepo keys" })
+  vim.notify("h/l or Tab/S-Tab panels · j/k move · - maximize panel · Enter open · e edit file · Space stage/checkout/apply · a stage all · i ignore · d discard/drop · c commit · s stash · M merge · r rebase · g pop · p pull · P push · R refresh · Esc back · q quit", vim.log.levels.INFO, { title = "lazyrepo keys" })
 end
 
 local function toggle_maximize()
@@ -517,7 +536,7 @@ local function configure(buf)
     local name = S.order[S.active]
     if name == "files" then discard() elseif name == "stashes" then stash_op("drop") elseif name == "locals" or name == "remotes" then delete_branch() end
   end)
-  map(buf, "i", ignore_selection)
+  map(buf, "e", edit_file); map(buf, "i", ignore_selection)
   map(buf, "c", commit); map(buf, "s", stash); map(buf, "M", function() branch_op("merge") end); map(buf, "r", function() branch_op("rebase") end)
   map(buf, "g", function() if S.order[S.active] == "stashes" then stash_op("pop") end end)
   map(buf, "p", function() run({ "pull" }, "Pull", true) end); map(buf, "P", push); map(buf, "R", M.refresh)

@@ -811,11 +811,12 @@ do
       -- bufadd() may reuse the initial empty buffer, in which case changing to
       -- target emits no BufEnter/BufWinEnter event.
       initialize_restored_buffer(target)
-      local initial_name = vim.api.nvim_buf_get_name(initial)
-      if initial ~= target and vim.api.nvim_buf_is_valid(initial)
-          and (initial_name == "" or vim.fn.isdirectory(initial_name) == 1)
-          and not vim.bo[initial].modified then
-        pcall(vim.api.nvim_buf_delete, initial, { force = true })
+      if initial ~= target and vim.api.nvim_buf_is_valid(initial) then
+        local initial_name = vim.api.nvim_buf_get_name(initial)
+        if (initial_name == "" or vim.fn.isdirectory(initial_name) == 1)
+            and not vim.bo[initial].modified then
+          pcall(vim.api.nvim_buf_delete, initial, { force = true })
+        end
       end
     end
   end
@@ -2065,6 +2066,7 @@ function _G.open_lazyrepo()
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
   local win = vim.api.nvim_open_win(buf, true, float_config())
+  local edit_request = vim.fn.tempname()
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
@@ -2079,9 +2081,31 @@ function _G.open_lazyrepo()
 
   local job_id = vim.fn.termopen({ lazyrepo }, {
     cwd = vim.fn.getcwd(),
+    env = {
+      LAZYREPO_NVIM_EDIT_REQUEST = edit_request,
+    },
     on_exit = vim.schedule_wrap(function()
+      local pending_edit
+      if vim.fn.filereadable(edit_request) == 1 then
+        local lines = vim.fn.readfile(edit_request)
+        if lines[1] and lines[1] ~= "" then
+          pending_edit = {
+            file = lines[1],
+            line = math.max(tonumber(lines[2]) or 1, 1),
+            col = math.max(tonumber(lines[3]) or 0, 0),
+          }
+        end
+      end
+      pcall(vim.fn.delete, edit_request)
       if resize_autocmd then pcall(vim.api.nvim_del_autocmd, resize_autocmd) end
       if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+      if pending_edit then
+        vim.cmd.edit(vim.fn.fnameescape(pending_edit.file))
+        local line_count = math.max(vim.api.nvim_buf_line_count(0), 1)
+        local line = math.min(pending_edit.line, line_count)
+        local text = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1] or ""
+        pcall(vim.api.nvim_win_set_cursor, 0, { line, math.min(pending_edit.col, #text) })
+      end
     end),
   })
 
