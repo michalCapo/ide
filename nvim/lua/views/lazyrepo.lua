@@ -16,7 +16,10 @@ local function setup_highlights()
   hl(0, "LazyrepoConflict", { link = "DiagnosticError" })
   hl(0, "LazyrepoFolder", { link = "Directory" })
   hl(0, "LazyrepoHash", { link = "Constant" })
+  hl(0, "LazyrepoAuthor", { link = "Identifier" })
   hl(0, "LazyrepoDate", { link = "Special" })
+  hl(0, "LazyrepoAhead", { link = "Added" })
+  hl(0, "LazyrepoBehind", { link = "DiagnosticWarn" })
   hl(0, "LazyrepoMuted", { link = "Comment" })
   local added = vim.api.nvim_get_hl(0, { name = "Added", link = false })
   local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
@@ -56,14 +59,24 @@ local function line_for(name, item)
       or "LazyrepoUnstaged"
     return indent .. status .. " " .. (item.path:match("[^/]+$") or item.path), { { group, #indent, -1 } }
   elseif name == "commits" then
-    return string.format("%s %s %s", item.short, item.date, item.subject),
-      { { "LazyrepoHash", 0, #item.short }, { "LazyrepoDate", #item.short + 1, #item.short + 1 + #item.date } }
+    return string.format("%s  %s  %s", item.author, item.date, item.subject),
+      { { "LazyrepoAuthor", 0, #item.author }, { "LazyrepoDate", #item.author + 2, #item.author + 2 + #item.date } }
   elseif name == "locals" then
     local head = (item.current and "* " or "  ") .. item.name
-    local line = head .. (item.upstream ~= "" and " → " .. item.upstream or "")
+    local line = head
     local spans = {}
     if item.current then spans[#spans + 1] = { "LazyrepoCurrent", 0, #head } end
-    if item.upstream ~= "" then spans[#spans + 1] = { "LazyrepoMuted", #head, -1 } end
+    if item.upstream ~= "" then
+      local upstream_start = #line
+      line = line .. " → " .. item.upstream
+      spans[#spans + 1] = { "LazyrepoMuted", upstream_start, #line }
+      local ahead_start = #line
+      line = line .. string.format("  ↑%d", item.ahead or 0)
+      spans[#spans + 1] = { "LazyrepoAhead", ahead_start, #line }
+      local behind_start = #line
+      line = line .. string.format(" ↓%d", item.behind or 0)
+      spans[#spans + 1] = { "LazyrepoBehind", behind_start, #line }
+    end
     return line, spans
   elseif name == "remotes" then return "  " .. item.name, {}
   end

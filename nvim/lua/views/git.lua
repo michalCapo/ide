@@ -129,7 +129,20 @@ function M.refs(root, remote)
   local format = "%(refname:short)%00%(objectname)%00%(upstream:short)%00%(HEAD)"
   local prefix = remote and "refs/remotes" or "refs/heads"
   local out, err = M.git(root, { "for-each-ref", "--format=" .. format, "--sort=refname", prefix })
-  return out and M.parse_refs(out) or nil, err
+  if not out then return nil, err end
+  local refs = M.parse_refs(out)
+  if not remote then
+    for _, ref in ipairs(refs) do
+      if ref.upstream ~= "" then
+        local counts = M.git(root, { "rev-list", "--left-right", "--count", ref.name .. "..." .. ref.upstream })
+        if counts then
+          ref.ahead, ref.behind = counts:match("^(%d+)%s+(%d+)")
+          ref.ahead, ref.behind = tonumber(ref.ahead) or 0, tonumber(ref.behind) or 0
+        end
+      end
+    end
+  end
+  return refs
 end
 
 
