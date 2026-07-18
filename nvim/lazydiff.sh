@@ -1,16 +1,53 @@
 #!/bin/sh
 set -eu
 
+usage() {
+  cat <<'EOF'
+Usage: lazydiff [OPTION] FILE
+
+Open the Git diff viewer for the repository containing the current directory.
+
+Arguments:
+  FILE         Open the diff viewer and initially focus this repository-relative file.
+
+Options:
+  -h, --help   Show this help and exit.
+EOF
+}
+
+case ${1:-} in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  --)
+    shift
+    ;;
+  -*)
+    echo "lazydiff: unknown option: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [ "$#" -eq 0 ]; then
+  usage
+  exit 0
+fi
+
+if [ "$#" -gt 1 ]; then
+  echo 'lazydiff: too many arguments' >&2
+  usage >&2
+  exit 2
+fi
+
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 NVIM_BIN=${LAZYDIFF_NVIM:-$SELF_DIR/@INSTALL_NAME@}
 if [ ! -x "$NVIM_BIN" ]; then
   NVIM_BIN=$(command -v "@INSTALL_NAME@" || true)
 fi
 [ -n "$NVIM_BIN" ] || { echo 'lazydiff requires @INSTALL_NAME@ on PATH' >&2; exit 127; }
-if [ "$#" -gt 0 ]; then
-  export LAZYDIFF_FILE=$1
-  shift
-fi
+export LAZYDIFF_FILE=$1
 export NVIM_PORTABLE_LAZYDIFF=1
 
 # `e` writes the selected file and cursor position here. Once the lightweight

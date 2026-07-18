@@ -50,6 +50,18 @@ make install
 `make build` writes commands to `dist/`. `make install` installs them to
 `~/.local/bin` by default.
 
+Review changes in the current Git repository, initially focusing a specific
+repository-relative file:
+
+```sh
+lazydiff
+lazydiff path/to/file
+lazydiff --help
+```
+
+Running `lazydiff` without arguments prints its usage. Pass one `FILE` argument
+to launch the viewer. Use `--` before a file whose name begins with `-`.
+
 Build settings can be overridden on the command line:
 
 ```sh
