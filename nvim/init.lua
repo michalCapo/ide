@@ -2043,6 +2043,61 @@ function _G.open_lazygit()
   vim.cmd.startinsert()
 end
 
+function _G.open_lazyrepo()
+  local lazyrepo = vim.env.NVIM_PORTABLE_LAZYREPO or "lazyrepo"
+  if vim.fn.executable(lazyrepo) ~= 1 then
+    vim.notify("lazyrepo is not installed or not on PATH", vim.log.levels.ERROR)
+    return
+  end
+
+  local function float_config()
+    return {
+      relative = "editor",
+      row = 0,
+      col = 0,
+      width = vim.o.columns,
+      height = vim.o.lines - vim.o.cmdheight,
+      border = "none",
+      style = "minimal",
+    }
+  end
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  local win = vim.api.nvim_open_win(buf, true, float_config())
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+
+  local resize_autocmd
+  resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
+    callback = vim.schedule_wrap(function()
+      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_set_config(win, float_config()) end
+    end),
+    desc = "Resize fullscreen lazyrepo float",
+  })
+
+  local job_id = vim.fn.termopen({ lazyrepo }, {
+    cwd = vim.fn.getcwd(),
+    on_exit = vim.schedule_wrap(function()
+      if resize_autocmd then pcall(vim.api.nvim_del_autocmd, resize_autocmd) end
+      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    end),
+  })
+
+  local function send_lazyrepo_escape()
+    if job_id and job_id > 0 then vim.api.nvim_chan_send(job_id, "\27") end
+    if vim.api.nvim_get_mode().mode ~= "t" then vim.cmd.startinsert() end
+  end
+  vim.keymap.set({ "t", "n" }, "<esc>", send_lazyrepo_escape, {
+    buffer = buf,
+    desc = "Send Esc to lazyrepo",
+    nowait = true,
+    silent = true,
+  })
+  vim.cmd.startinsert()
+end
+
 local ctrl_s_format_skip_filetypes = {
   go = true, -- gopls formats Go on BufWritePre below; avoid double-formatting.
 }
@@ -2587,7 +2642,8 @@ _G.nvim_keymap_search_groups = {
       { "<leader>e", "Project errors view" },
       { "<leader>f", "Toggle file explorer" },
       { "<leader>gb", "Git blame current line" },
-      { "<leader>gg", "Open lazygit" },
+      { "<leader>gg", "Open lazyrepo" },
+      { "<leader>gl", "Open lazygit" },
     },
   },
   {
@@ -7843,7 +7899,8 @@ local function git_blame_current_line()
 end
 
 vim.keymap.set("n", "<leader>gb", git_blame_current_line, { desc = "Git blame current line" })
-vim.keymap.set("n", "<leader>gg", _G.open_lazygit, { desc = "Open lazygit" })
+vim.keymap.set("n", "<leader>gg", _G.open_lazyrepo, { desc = "Open lazyrepo" })
+vim.keymap.set("n", "<leader>gl", _G.open_lazygit, { desc = "Open lazygit" })
 vim.keymap.set("n", "<leader>ge", function()
   references_view.project_errors()
 end, { desc = "Project errors" })
