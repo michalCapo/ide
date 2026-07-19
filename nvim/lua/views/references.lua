@@ -32,7 +32,8 @@ local function apply_highlights()
   vim.api.nvim_set_hl(0, "ReferenceViewHeaderKey", { link = "Identifier" })
   vim.api.nvim_set_hl(0, "ReferenceViewGap", { link = "Normal" })
   vim.api.nvim_set_hl(0, "ReferenceViewHit", {
-    bg = vim.o.background == "light" and "#c7dfef" or "#385f78",
+    bg = vim.o.background == "light" and "#ffd6a0" or "#6b4300",
+    fg = vim.o.background == "light" and "#1f2328" or "#ffffff",
   })
   vim.api.nvim_set_hl(0, "ReferenceViewErrorHit", { link = "DiagnosticUnderlineError" })
   vim.api.nvim_set_hl(0, "ReferenceViewLine", { link = "Normal" })
@@ -647,16 +648,22 @@ local function render(files, title, scheme)
   end
 
   for _, target in ipairs(hit_marks) do
+    local hit_group = target.hl_group or "ReferenceViewHit"
     vim.api.nvim_buf_set_extmark(buf, namespace, target.row - 1, math.max(target.byte_col, 0), {
       end_col = math.max(target.end_byte_col, target.byte_col + 1),
-      hl_group = target.hl_group or "ReferenceViewHit",
-      hl_mode = "combine",
+      hl_group = hit_group,
+      -- Syntax highlighting paints the preview after its source regions are
+      -- loaded. Replace its cell style for references so the match background
+      -- cannot be discarded; diagnostic hits still combine their underline.
+      hl_mode = target.hl_group and "combine" or "replace",
       priority = 160,
     })
-    vim.api.nvim_buf_set_extmark(buf, namespace, target.row - 1, 0, {
-      line_hl_group = target.line_hl_group or "ReferenceViewLine",
-      priority = 40,
-    })
+    if target.line_hl_group then
+      vim.api.nvim_buf_set_extmark(buf, namespace, target.row - 1, 0, {
+        line_hl_group = target.line_hl_group,
+        priority = 40,
+      })
+    end
   end
 
   for row, messages in pairs(error_messages) do
