@@ -69,6 +69,15 @@ function M.status(root)
   return out and M.parse_status(out) or nil, err
 end
 
+-- A compact snapshot for detecting repository changes without rebuilding every panel.
+-- Porcelain v2 includes the current branch/OID, upstream counts, stash count, and
+-- worktree status. Its stable output makes it suitable for cheap background polling.
+function M.watch_state_async(root, callback)
+  return M.git_async(root,
+    { "status", "--porcelain=v2", "--branch", "--show-stash", "-z", "--untracked-files=all" },
+    function(ok, out, err) callback(ok and out or nil, err) end)
+end
+
 function M.tree(files, collapsed)
   local root = { kind = "folder", path = "", children = {} }
   for _, file in ipairs(files) do

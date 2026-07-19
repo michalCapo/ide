@@ -3,7 +3,8 @@ local M = {}
 
 local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "remotes", "stashes", "commits" },
   active = 1, collapsed = {}, commit_files = nil, commits_show_changes = false, stash_files = nil, busy = false,
-  dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil }
+  dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
+  watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false }
 
 local ns = vim.api.nvim_create_namespace("lazyrepo")
 
@@ -181,6 +182,43 @@ function M.refresh()
   for _, err in ipairs(errors) do if err then notify_error(err); break end end
 end
 
+local function stop_watching()
+  if S.watch_timer then
+    S.watch_timer:stop()
+    if not S.watch_timer:is_closing() then S.watch_timer:close() end
+    S.watch_timer = nil
+  end
+  if S.watch_request and S.watch_request.kill then pcall(S.watch_request.kill, S.watch_request, 15) end
+  S.watch_request = nil
+  S.watch_pending = false
+end
+
+local function poll_repository()
+  if not S.root or S.watch_request then return end
+  S.watch_request = git.watch_state_async(S.root, function(state)
+    S.watch_request = nil
+    if not state then return end
+    if S.watch_state == nil then
+      S.watch_state = state
+      return
+    end
+    if state == S.watch_state then return end
+    S.watch_state = state
+    if S.busy then
+      S.watch_pending = true
+      return
+    end
+    M.refresh()
+  end)
+end
+
+local function start_watching()
+  stop_watching()
+  S.watch_state = nil
+  S.watch_timer = vim.uv.new_timer()
+  S.watch_timer:start(0, 750, vim.schedule_wrap(poll_repository))
+end
+
 local function focus(delta)
   local visible, current = visible_order(), S.order[S.active]
   local position = 1
@@ -223,6 +261,7 @@ local function run(args, label, async)
     S.busy = false
     if not ok then notify_error((label or "Git operation") .. " failed:\n" .. err) end
     M.refresh()
+    S.watch_pending = false
   end
   if async then git.git_async(S.root, args, done) else
     local out, err = git.git(S.root, args); done(out ~= nil, out or "", err or "")
@@ -658,9 +697,14 @@ function M.launch()
     group = layout_group,
     callback = function() vim.schedule(apply_layout) end,
   })
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = layout_group,
+    once = true,
+    callback = stop_watching,
+  })
   apply_layout(true)
   vim.schedule(function() apply_layout(false) end)
-  vim.api.nvim_set_current_win(left); S.active = 1; M.refresh()
+  vim.api.nvim_set_current_win(left); S.active = 1; M.refresh(); start_watching()
 end
 
 M._state = S
