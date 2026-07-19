@@ -32,13 +32,12 @@ set dotfiles
 " Main settings
 " ------------------------------------------------------------------------------
 
-" Command used to edit files in various contexts.  The default is vim.
-" If you would like to use another vi clone such as Elvis or Vile
-" you will need to change this setting.
-if executable('vim')
-    set vicmd=vim
-elseif executable('nvim')
+" Command used to edit files in various contexts.
+" Prefer Neovim, with Vim as a fallback.
+if executable('nvim')
     set vicmd=nvim
+elseif executable('vim')
+    set vicmd=vim
 elseif executable('elvis')
     set vicmd=elvis\ -G\ termcap
 elseif executable('vile')
@@ -178,12 +177,12 @@ mark h ~/
 "  see `:help vifm-macros` and `:help vifm-filename-modifiers` for more
 
 command! df df -h %m 2> /dev/null
-command! diff vim -d %f %F
+command! diff nvim -d %f %F
 command! zip zip -r %c.zip %f
 command! run !! ./%f
 command! make !!make %a
 command! mkcd :mkdir %a | cd %a
-command! vgrep vim "+grep %a"
+command! vgrep nvim "+grep %a"
 command! reload :write | restart full
 
 " ------------------------------------------------------------------------------
