@@ -27,6 +27,11 @@ vim.fn.writefile({ vim.json.encode(config) }, root .. "/lazydata/connections.jso
 vim.fn.setfperm(root .. "/lazydata/connections.json", "rw-------")
 
 local lazydata = require("views.lazydata")
+assert(lazydata._value_filetype({ type = "text" }, [[{"name":"LazyData"}]]) == "json", "JSON content in a text column was not detected")
+assert(lazydata._value_filetype({ type = "jsonb" }, "not yet valid") == "json", "JSON column type was not detected")
+assert(lazydata._value_filetype({ type = "text" }, [[<?xml version="1.0"?><root/>]]) == "xml", "XML content was not detected")
+assert(lazydata._value_filetype({ name = "script.sh", type = "text" }, "echo hello") == "sh", "filename hint was not detected")
+assert(lazydata._value_filetype({ type = "text" }, "plain text") == "text", "plain text was misdetected")
 lazydata.launch()
 local state = lazydata._state
 

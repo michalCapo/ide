@@ -837,6 +837,36 @@ local function viewer_config(column)
   return {relative="editor",style="minimal",border="rounded",title=" "..column.name.." ",title_pos="center",footer=" q/Esc close · / search · visual select/yank ",footer_pos="center",width=width,height=height,row=1,col=2,zindex=70}
 end
 
+local value_type_filetypes={json="json",jsonb="json",xml="xml",html="html",yaml="yaml",yml="yaml",toml="toml",sql="sql",markdown="markdown",md="markdown",javascript="javascript",typescript="typescript",lua="lua",css="css",scss="scss",bash="bash",shell="sh",csv="csv"}
+
+local function value_filetype(column,text,lines)
+  local column_type=(column.type or""):lower():gsub("^%s+",""):gsub("%s+$","")
+  local hinted=value_type_filetypes[column_type]or value_type_filetypes[column_type:match("^[%w_]+")or""]
+  if not hinted and column_type:find("json",1,true)then hinted="json"end
+  if not hinted and column_type:find("xml",1,true)then hinted="xml"end
+  if hinted then return hinted end
+  lines=lines or vim.split(text or"","\n",{plain=true})
+  local filename=(column.name or""):find("%.")and column.name or nil
+  if vim.filetype and vim.filetype.match then
+    local ok,matched=pcall(vim.filetype.match,{filename=filename,contents=lines})
+    if ok and matched and matched~=""then return matched end
+  end
+  local trimmed=vim.trim(text or"")
+  if trimmed:sub(1,1)=="{"or trimmed:sub(1,1)=="["then
+    local ok,value=pcall(vim.json.decode,trimmed)
+    if ok and type(value)=="table"then return"json"end
+  end
+  if trimmed:match("^<%?xml[%s?]")then return"xml"end
+  if trimmed:match("^<!DOCTYPE%s+[Hh][Tt][Mm][Ll]")or trimmed:match("^<[Hh][Tt][Mm][Ll][%s>]" )then return"html"end
+  if trimmed:match("^<[%a_][%w_.:-]*[%s>/]")then return"xml"end
+  if trimmed:match("^%%YAML")or trimmed:match("^%-%-%-%s*\n")then return"yaml"end
+  if trimmed:match("^%[[%w_.%-]+%]%s*\n")and trimmed:match("\n[%w_.%-]+%s*=")then return"toml"end
+  if trimmed:match("^#{1,6}%s+")or trimmed:find("\n```",1,true)then return"markdown"end
+  local first_word=trimmed:lower():match("^(%a+)")
+  if ({select=true,with=true,insert=true,update=true,delete=true,create=true,alter=true,drop=true})[first_word]then return"sql"end
+  return"text"
+end
+
 open_value_viewer = function()
   local item=workspace();if not item or item.kind~="table"or item.mode~="rows"or not item.data then return end
   local cursor=S.main.win and vim.api.nvim_win_is_valid(S.main.win)and vim.api.nvim_win_get_cursor(S.main.win)or{3,0};local row_index=cursor[1]-2;local column_index=item.active_col or 1;local row=item.data.rows and item.data.rows[row_index];local column=item.columns and item.columns[column_index]
@@ -846,9 +876,12 @@ open_value_viewer = function()
   local lines=vim.split(text,"\n",{plain=true});if #lines==0 then lines={""}end
   if S.viewer and S.viewer.win and vim.api.nvim_win_is_valid(S.viewer.win)then pcall(vim.api.nvim_win_close,S.viewer.win,true)end
   local viewer={column=column,return_win=vim.api.nvim_get_current_win()};viewer.buf=make_buf("value/"..column.name,false);vim.bo[viewer.buf].bufhidden="wipe";set_lines(viewer.buf,lines);vim.bo[viewer.buf].readonly=true
-  local column_type=(column.type or""):lower();if column_type:find("json",1,true)then vim.bo[viewer.buf].filetype="json"else vim.bo[viewer.buf].filetype="text"end
+  local filetype=value_filetype(column,text,lines);vim.bo[viewer.buf].filetype=filetype
+  vim.api.nvim_buf_call(viewer.buf,function()vim.cmd("syntax enable");vim.bo.syntax=filetype end)
+  if filetype~="text"and vim.treesitter and vim.treesitter.start then pcall(vim.treesitter.start,viewer.buf,filetype)end
   viewer.win=vim.api.nvim_open_win(viewer.buf,true,viewer_config(column));S.viewer=viewer
   vim.wo[viewer.win].number=#lines>1;vim.wo[viewer.win].relativenumber=false;vim.wo[viewer.win].signcolumn="no";vim.wo[viewer.win].wrap=true;vim.wo[viewer.win].linebreak=true;vim.wo[viewer.win].breakindent=true;vim.wo[viewer.win].cursorline=false
+  vim.wo[viewer.win].winhighlight="Normal:Normal,NormalNC:Normal,FloatBorder:FloatBorder,FloatTitle:Title,EndOfBuffer:EndOfBuffer"
   local function close_viewer()if S.viewer~=viewer then return end;S.viewer=nil;if viewer.resize_autocmd then pcall(vim.api.nvim_del_autocmd,viewer.resize_autocmd)end;if viewer.win and vim.api.nvim_win_is_valid(viewer.win)then pcall(vim.api.nvim_win_close,viewer.win,true)end;if viewer.return_win and vim.api.nvim_win_is_valid(viewer.return_win)then pcall(vim.api.nvim_set_current_win,viewer.return_win)end end
   local opts={buffer=viewer.buf,silent=true,nowait=true};vim.keymap.set("n","q",close_viewer,opts);vim.keymap.set("n","<Esc>",close_viewer,opts)
   viewer.resize_autocmd=vim.api.nvim_create_autocmd("VimResized",{callback=function()if S.viewer==viewer and viewer.win and vim.api.nvim_win_is_valid(viewer.win)then vim.api.nvim_win_set_config(viewer.win,viewer_config(column))end end})
@@ -929,5 +962,6 @@ end
 M._state=S
 M._read_looking=read_looking
 M._value_text=value_text
+M._value_filetype=value_filetype
 M._open_picker=open_picker
 return M
