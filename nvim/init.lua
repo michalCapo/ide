@@ -834,6 +834,29 @@ end
 
 -- Automatic code completion: suggest from LSP plus nearby/current-file words.
 -- Keep it buffer-local so prompt/floating picker popups do not autocomplete.
+require("supermaven-nvim").setup({
+  -- The completion mappings below arbitrate between Neovim's popup menu and
+  -- Supermaven, so the plugin must not install its own competing mappings.
+  disable_keymaps = true,
+  ignore_filetypes = {
+    gitcommit = true,
+    gitrebase = true,
+    help = true,
+  },
+  condition = function()
+    return vim.bo.buftype ~= "" or not vim.bo.modifiable
+  end,
+})
+
+-- Upstream implements :SupermavenStatus as a trace log message, which is
+-- invisible at the default info log level. Keep the command useful without
+-- enabling verbose logging globally.
+vim.api.nvim_create_user_command("SupermavenStatus", function()
+  local running = require("supermaven-nvim.api").is_running()
+  vim.notify("Supermaven is " .. (running and "running" or "not running"),
+    running and vim.log.levels.INFO or vim.log.levels.WARN)
+end, { force = true, desc = "Show Supermaven status" })
+
 vim.o.autocomplete = false
 -- 100ms delay: the menu appears on a micro-pause instead of churning under
 -- every keystroke of continuous typing; timeout caps source collection.
@@ -895,8 +918,29 @@ vim.keymap.set("i", "<Tab>", function()
     end
     return keycode("<C-e><Tab>")
   end
+
+  local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
+  if ok and suggestion.has_suggestion() then
+    suggestion.on_accept_suggestion()
+    return ""
+  end
+
   return keycode("<Tab>")
 end, { expr = true, desc = "Accept completion or insert tab" })
+
+vim.keymap.set("i", "<C-j>", function()
+  local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
+  if ok and suggestion.has_suggestion() then
+    suggestion.on_accept_suggestion_word()
+  end
+end, { desc = "Accept next Supermaven word" })
+
+vim.keymap.set("i", "<C-]>", function()
+  local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
+  if ok then
+    suggestion.on_dispose_inlay()
+  end
+end, { desc = "Clear Supermaven suggestion" })
 
 vim.keymap.set("n", "<Tab>", "<C-i>", { desc = "Jump forward" })
 

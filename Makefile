@@ -123,6 +123,7 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	test -d "$(NVIM_SOURCE_DIR)/lua" || { echo 'Neovim lua directory is missing' >&2; exit 1; }
 	test -d "$(NVIM_SOURCE_DIR)/vscode-theme" || { echo 'Bundled theme is missing' >&2; exit 1; }
 	test -d "$(NVIM_SOURCE_DIR)/nvim-dap" || { echo 'Bundled nvim-dap is missing' >&2; exit 1; }
+	test -d "$(NVIM_SOURCE_DIR)/supermaven-nvim" || { echo 'Bundled supermaven-nvim is missing' >&2; exit 1; }
 	test -f "$(LAZYGIT_SOURCE_DIR)/config.yml" || { echo 'Lazygit config is missing' >&2; exit 1; }
 	test -x "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" || { echo 'Lazygit edit helper is missing or not executable' >&2; exit 1; }
 	WORK=$$(mktemp -d)
@@ -134,6 +135,7 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	cp -R "$(NVIM_SOURCE_DIR)/lua" "$$WORK/nvim-payload/config/lua"
 	cp -R "$(NVIM_SOURCE_DIR)/vscode-theme" "$$WORK/nvim-payload/config/vscode-theme"
 	cp -R "$(NVIM_SOURCE_DIR)/nvim-dap" "$$WORK/nvim-payload/config/nvim-dap"
+	cp -R "$(NVIM_SOURCE_DIR)/supermaven-nvim" "$$WORK/nvim-payload/config/supermaven-nvim"
 	CONFIG_HASH=$$(cd "$$WORK/nvim-payload/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
 	NVIM_HASH=$$(sha256sum "$(NVIM_ARCHIVE)" | cut -d' ' -f1)
 	PAYLOAD_ID=$$(printf '%s\n' '$(NVIM_VERSION)-$(ARCH)' "$$NVIM_HASH" "$$CONFIG_HASH" | sha256sum | cut -c1-16)
