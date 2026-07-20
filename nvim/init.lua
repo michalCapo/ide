@@ -882,12 +882,6 @@ local function keycode(keys)
 end
 
 vim.keymap.set("i", "<Tab>", function()
-  local predict = require("predict")
-  if predict.has_prediction() then
-    -- expr mappings run under textlock; apply the edit right after.
-    vim.schedule(predict.accept)
-    return ""
-  end
   if vim.fn.pumvisible() == 1 then
     -- With only whitespace before the cursor, Tab means indent even if a stray
     -- popup is open; accepting a completion there is always a mistype.
@@ -904,18 +898,7 @@ vim.keymap.set("i", "<Tab>", function()
   return keycode("<Tab>")
 end, { expr = true, desc = "Accept completion or insert tab" })
 
-vim.keymap.set("n", "<Tab>", function()
-  if require("predict").accept() then
-    return
-  end
-  vim.api.nvim_feedkeys(keycode("<C-i>"), "n", false)
-end, { desc = "Accept prediction or jump forward" })
-
-vim.keymap.set("i", "<esc>", function()
-  -- expr mappings run under textlock; drop the prediction right after.
-  vim.schedule(require("predict").dismiss)
-  return keycode("<Esc>")
-end, { expr = true, desc = "Dismiss prediction and leave insert" })
+vim.keymap.set("n", "<Tab>", "<C-i>", { desc = "Jump forward" })
 
 vim.keymap.set("i", "<S-Tab>", function()
   if vim.fn.pumvisible() == 1 then
@@ -2242,11 +2225,8 @@ vim.keymap.set("n", "<esc>", function()
     focus_file_buffer()
     return
   end
-  if require("predict").dismiss() then
-    return
-  end
   vim.cmd.nohlsearch()
-end, { desc = "Dismiss prediction / clear search highlight / leave terminal" })
+end, { desc = "Clear search highlight / leave terminal" })
 
 -- Built-in file explorer (netrw)
 vim.g.netrw_banner = 0
@@ -7980,9 +7960,6 @@ vim.keymap.set("n", "<leader>ge", function()
 end, { desc = "Project errors" })
 
 require("agent").setup()
-
-require("predict").setup()
-vim.keymap.set("n", "<leader>ap", "<cmd>PredictToggle<cr>", { desc = "Prediction: toggle edit" })
 
 vim.keymap.set("n", "<leader>aa", function()
   require("agent").toggle()
