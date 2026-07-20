@@ -1,8 +1,8 @@
 # Portable terminal tools
 
-Personal Neovim, Lazygit, and Vifm configuration packaged as portable Linux
-commands. The build bundles each upstream executable with its configuration and
-also creates the `lazydiff` and `lazyrepo` companion commands.
+Personal Neovim, database, Git, and file-management tools packaged as portable
+Linux commands. The build bundles each executable with its configuration and
+also creates the `lazydata`, `lazydiff`, and `lazyrepo` companion commands.
 
 ## Included commands
 
@@ -11,6 +11,7 @@ also creates the `lazydiff` and `lazyrepo` companion commands.
 | `nvim` | yes | yes |
 | `lazydiff` | yes | yes |
 | `lazyrepo` | yes | yes |
+| `lazydata` | yes | yes |
 | `lazygit` | yes | yes |
 | `vifm` | yes | no |
 
@@ -22,7 +23,7 @@ changed. The launchers unpack their bundled configuration below
 ## Requirements
 
 - Linux (`x86_64` or `arm64`)
-- `make`, `curl`, `tar`, `sha256sum`, and Bash
+- `make`, `curl`, `tar`, `sha256sum`, Bash, and Go 1.25.7 or newer when building
 - x86_64 host when building the Vifm package
 
 The Neovim plugins, themes, Lazygit configuration, and Vifm configuration are
@@ -74,6 +75,28 @@ The dashboard uses Files, Local/Remote/Stash, and Commits columns. In terminals
 narrower than 100 columns it collapses to the active panel; use `h`/`l` or
 `Tab`/`Shift-Tab` to move between panels.
 
+Open the database viewer:
+
+```sh
+lazydata
+lazydata --help
+```
+
+LazyData supports PostgreSQL, SQL Server, and SQLite through its bundled
+`lazydata-sql` helper. Connection profiles are managed at startup and stored with mode `0600`
+in `${XDG_CONFIG_HOME:-~/.config}/lazydata/connections.json`. Passwords are
+stored in plaintext in that file.
+
+Use `j`/`k` and `gg`/`G` to move, `Tab` to change panels, `Enter` to open a
+table, `1`/`2` for rows/columns, `c` to search and jump to a column, `/` for
+search or a WHERE clause, `v` to view the complete selected cell in a large
+read-only buffer, and `u` for distinct values from the selected column.
+An `id` column is displayed first. The table sidebar hides while the table has
+focus; press `Tab` to show and focus it again. `[p`/`]p` page data and
+`[t`/`]t` switch open tables or query tabs. `<C-e>` opens a query and `<C-r>` runs it. In the
+connection dialog, `<C-t>` tests the connection and `<C-s>` saves it. Press `?`
+inside LazyData for the complete key list.
+
 Build settings can be overridden on the command line:
 
 ```sh
@@ -97,7 +120,6 @@ make clean   # remove dist/ but keep cached downloads
 - `nvim/` contains the Neovim configuration, bundled plugins, and launcher
   templates.
 - `lazygit/` contains the active Lazygit configuration and parent-editor helper.
-- `gitui/` is retained but disabled for now.
 - `vifm/` contains the Vifm configuration, colors, and scripts.
 - The root `Makefile` builds all portable commands and release assets.
 

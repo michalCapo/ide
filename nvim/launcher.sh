@@ -6,7 +6,7 @@ SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CACHE_BASE=${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}
 APP_DIR="$CACHE_BASE/nvim-portable/$PAYLOAD_ID"
 PORTABLE_VIEWER=0
-if [ "${NVIM_PORTABLE_LAZYDIFF:-}" = 1 ] || [ "${NVIM_PORTABLE_LAZYREPO:-}" = 1 ]; then
+if [ "${NVIM_PORTABLE_LAZYDIFF:-}" = 1 ] || [ "${NVIM_PORTABLE_LAZYREPO:-}" = 1 ] || [ "${NVIM_PORTABLE_LAZYDATA:-}" = 1 ]; then
   PORTABLE_VIEWER=1
 fi
 
@@ -28,6 +28,13 @@ if [ -x "$SELF_DIR/lazygit" ]; then
 fi
 if [ -x "$SELF_DIR/lazyrepo" ]; then
   export NVIM_PORTABLE_LAZYREPO="$SELF_DIR/lazyrepo"
+fi
+if [ -x "$SELF_DIR/lazydata" ]; then
+  export NVIM_PORTABLE_LAZYDATA="$SELF_DIR/lazydata"
+fi
+if [ -x "$SELF_DIR/lazydata-sql" ]; then
+  export NVIM_PORTABLE_LAZYDATA_SQL="$SELF_DIR/lazydata-sql"
+  export NVIM_PORTABLE_LAZYDATA_BACKEND="$SELF_DIR/lazydata-sql"
 fi
 unset VIM VIMRUNTIME
 if [ "$PORTABLE_VIEWER" = 1 ]; then
