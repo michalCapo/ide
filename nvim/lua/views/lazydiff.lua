@@ -26,7 +26,7 @@ local namespace = vim.api.nvim_create_namespace("git_diff_view")
 local KEYMAP_STATUSLINE = table.concat({
   " h/l change  j/k block  [c/]c change  n/N file edge  J/K file ",
   " <Space> stage  d discard  a all  c commit  e edit  <Tab> mode ",
-  " <leader>w wrap  R refresh  L gitui  q/Esc close ",
+  " <leader>w wrap  R refresh  q/Esc close ",
 })
 local READONLY_KEYMAP_STATUSLINE = " h/l change  j/k block  [c/]c change  n/N file edge  J/K file  <Tab> mode  <leader>w wrap  q/Esc close "
 
@@ -777,47 +777,6 @@ function M.refresh()
   vim.notify("Git diff view: refreshed", vim.log.levels.INFO)
 end
 
--- Hand off to gitui for advanced repo work. Runs it in a full-screen
--- terminal tab in the same window; on exit we return to the diff view and
--- refresh, since gitui may have changed the repo state.
-function M.open_gitui()
-  local gitui = vim.env.NVIM_PORTABLE_GITUI or "gitui"
-  if vim.fn.executable(gitui) ~= 1 then
-    vim.notify("Git diff view: gitui is not installed", vim.log.levels.ERROR)
-    return
-  end
-
-  local root = state.root
-  local return_tab = state.tabpage
-
-  vim.cmd("tabnew")
-  local gitui_tab = vim.api.nvim_get_current_tabpage()
-  local term_buf = vim.api.nvim_get_current_buf()
-
-  vim.fn.jobstart({ gitui }, {
-    cwd = root,
-    term = true,
-    on_exit = function()
-      vim.schedule(function()
-        if return_tab and vim.api.nvim_tabpage_is_valid(return_tab) then
-          pcall(vim.api.nvim_set_current_tabpage, return_tab)
-        end
-        if vim.api.nvim_tabpage_is_valid(gitui_tab) then
-          for _, win in ipairs(vim.api.nvim_tabpage_list_wins(gitui_tab)) do
-            pcall(vim.api.nvim_win_close, win, true)
-          end
-        end
-        wipe_buffer(term_buf)
-        -- Reload the view; if gitui committed/stashed everything away this
-        -- may close it (and, standalone, quit) -- which is the right outcome.
-        M.refresh()
-      end)
-    end,
-  })
-
-  vim.cmd("startinsert")
-end
-
 local function open_commit_prompt()
   if state.commit_prompt_win and vim.api.nvim_win_is_valid(state.commit_prompt_win) then
     vim.api.nvim_set_current_win(state.commit_prompt_win)
@@ -907,7 +866,6 @@ local function configure_diff_keymaps(buf)
   vim.keymap.set("n", "<leader>w", function()
     vim.wo.wrap = not vim.wo.wrap
   end, vim.tbl_extend("force", opts, { desc = "Toggle line wrap" }))
-  vim.keymap.set("n", "L", M.open_gitui, vim.tbl_extend("force", opts, { desc = "Open gitui" }))
   vim.keymap.set("n", "<Tab>", M.toggle_current_only, vim.tbl_extend("force", opts, { desc = "Toggle diff/current file view" }))
   if not state.revision then
     vim.keymap.set("n", "d", M.discard_current_block, vim.tbl_extend("force", opts, { desc = "Discard current diff block" }))
