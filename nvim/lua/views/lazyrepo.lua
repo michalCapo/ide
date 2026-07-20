@@ -5,6 +5,7 @@ local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "re
   active = 1, collapsed = {}, commit_files = nil, commits_show_changes = false, stash_files = nil, busy = false,
   dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
   watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false,
+  fetch_timer = nil, fetch_request = nil,
   commit_prompt_win = nil, commit_prompt_buf = nil, commit_history = nil, commit_history_index = nil,
   commit_prompt_draft = nil }
 
@@ -193,6 +194,13 @@ local function stop_watching()
   if S.watch_request and S.watch_request.kill then pcall(S.watch_request.kill, S.watch_request, 15) end
   S.watch_request = nil
   S.watch_pending = false
+  if S.fetch_timer then
+    S.fetch_timer:stop()
+    if not S.fetch_timer:is_closing() then S.fetch_timer:close() end
+    S.fetch_timer = nil
+  end
+  if S.fetch_request and S.fetch_request.kill then pcall(S.fetch_request.kill, S.fetch_request, 15) end
+  S.fetch_request = nil
 end
 
 local function poll_repository()
@@ -219,6 +227,16 @@ local function start_watching()
   S.watch_state = nil
   S.watch_timer = vim.uv.new_timer()
   S.watch_timer:start(0, 750, vim.schedule_wrap(poll_repository))
+
+  local fetch_interval = tonumber(vim.g.lazyrepo_fetch_interval_ms) or 60000
+  S.fetch_timer = vim.uv.new_timer()
+  S.fetch_timer:start(0, fetch_interval, vim.schedule_wrap(function()
+    if not S.root or S.busy or S.fetch_request then return end
+    S.fetch_request = git.git_async(S.root, { "fetch", "--all", "--prune", "--quiet" }, function(ok)
+      S.fetch_request = nil
+      if ok and S.root then M.refresh() end
+    end, { env = { GIT_TERMINAL_PROMPT = "0", GIT_SSH_COMMAND = "ssh -o BatchMode=yes" } })
+  end))
 end
 
 local function focus(delta)

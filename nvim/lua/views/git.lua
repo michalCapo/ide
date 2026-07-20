@@ -23,10 +23,11 @@ function M.git(root, args, opts)
   return M.system(command, opts)
 end
 
-function M.git_async(root, args, callback)
+function M.git_async(root, args, callback, opts)
   local command = { "git", "-C", root }
   vim.list_extend(command, args)
-  return vim.system(command, { text = true }, function(result)
+  opts = vim.tbl_extend("force", { text = true }, opts or {})
+  return vim.system(command, opts, function(result)
     vim.schedule(function()
       callback(result.code == 0, result.stdout or "", vim.trim(result.stderr or ""), result)
     end)
