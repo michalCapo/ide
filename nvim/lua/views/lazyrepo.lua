@@ -4,7 +4,9 @@ local M = {}
 local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "remotes", "stashes", "commits" },
   active = 1, collapsed = {}, commit_files = nil, commits_show_changes = false, stash_files = nil, busy = false,
   dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
-  watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false }
+  watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false,
+  commit_prompt_win = nil, commit_prompt_buf = nil, commit_history = nil, commit_history_index = nil,
+  commit_prompt_draft = nil }
 
 local ns = vim.api.nvim_create_namespace("lazyrepo")
 
@@ -253,7 +255,7 @@ local function jump(to_bottom)
   end
 end
 
-local function run(args, label, async)
+local function run(args, label, async, opts)
   if S.busy then return end
   S.busy = true
   for _, name in ipairs(S.order) do render(name) end
@@ -264,7 +266,7 @@ local function run(args, label, async)
     S.watch_pending = false
   end
   if async then git.git_async(S.root, args, done) else
-    local out, err = git.git(S.root, args); done(out ~= nil, out or "", err or "")
+    local out, err = git.git(S.root, args, opts); done(out ~= nil, out or "", err or "")
   end
 end
 
@@ -330,10 +332,115 @@ local function ignore_selection()
   end)
 end
 
+local function close_commit_prompt()
+  pcall(vim.cmd, "stopinsert")
+  if S.commit_prompt_win and vim.api.nvim_win_is_valid(S.commit_prompt_win) then
+    pcall(vim.api.nvim_win_close, S.commit_prompt_win, true)
+  end
+  if S.commit_prompt_buf and vim.api.nvim_buf_is_valid(S.commit_prompt_buf) then
+    pcall(vim.api.nvim_buf_delete, S.commit_prompt_buf, { force = true })
+  end
+  S.commit_prompt_win = nil
+  S.commit_prompt_buf = nil
+  S.commit_history_index = nil
+  S.commit_prompt_draft = nil
+end
+
+local function commit_message_history()
+  if S.commit_history then return S.commit_history end
+  local output = git.git(S.root, { "log", "-n", "50", "--format=%B%x00" }, { allowed_codes = { 0, 128 } })
+  local history, seen = {}, {}
+  for _, message in ipairs(git.split_nul(output or "")) do
+    message = message:gsub("\n+$", "")
+    if vim.trim(message) ~= "" and not seen[message] then
+      history[#history + 1] = message
+      seen[message] = true
+    end
+  end
+  S.commit_history = history
+  return history
+end
+
+local function prompt_message(buf)
+  return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n"):gsub("\n+$", "")
+end
+
+local function set_prompt_message(buf, message)
+  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  local lines = vim.split(message or "", "\n", { plain = true })
+  if #lines == 0 then lines = { "" } end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  if S.commit_prompt_win and vim.api.nvim_win_is_valid(S.commit_prompt_win) then
+    local last = math.max(vim.api.nvim_buf_line_count(buf), 1)
+    vim.api.nvim_win_set_cursor(S.commit_prompt_win, { last, #(lines[last] or "") })
+  end
+end
+
 local function commit()
-  vim.ui.input({ prompt = "Commit message: " }, function(message)
-    if message and vim.trim(message) ~= "" then run({ "commit", "-m", message }, "Commit", false) end
-  end)
+  if S.commit_prompt_win and vim.api.nvim_win_is_valid(S.commit_prompt_win) then
+    vim.api.nvim_set_current_win(S.commit_prompt_win)
+    vim.cmd("startinsert!")
+    return
+  end
+
+  local width = math.min(math.max(math.floor(vim.o.columns * 0.55), 48), vim.o.columns - 4)
+  local height = math.min(8, math.max(3, vim.o.lines - 6))
+  local buf = vim.api.nvim_create_buf(false, true)
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    row = math.max(math.floor((vim.o.lines - height) / 2) - 1, 0),
+    col = math.max(math.floor((vim.o.columns - width) / 2), 0),
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+    title = " Commit message ",
+    title_pos = "center",
+    footer = " Enter: commit  Ctrl-j: newline  Up/Down: history  Esc: cancel ",
+    footer_pos = "center",
+  })
+  S.commit_prompt_buf, S.commit_prompt_win = buf, win
+  S.commit_history_index, S.commit_prompt_draft = 0, ""
+
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
+  vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
+  vim.api.nvim_set_option_value("filetype", "gitcommit", { buf = buf })
+  vim.wo[win].wrap = true
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  set_prompt_message(buf, "")
+
+  local function submit()
+    local message = prompt_message(buf)
+    if vim.trim(message) == "" then
+      vim.notify("lazyrepo: commit message is empty", vim.log.levels.WARN)
+      return
+    end
+    close_commit_prompt()
+    S.commit_history = nil
+    run({ "commit", "--file", "-" }, "Commit", false, { stdin = message .. "\n" })
+  end
+
+  local function history(delta)
+    local messages = commit_message_history()
+    if #messages == 0 then return end
+    local current = S.commit_history_index or 0
+    if current == 0 and delta > 0 then S.commit_prompt_draft = prompt_message(buf) end
+    local next_index = math.min(math.max(current + delta, 0), #messages)
+    if next_index == current then return end
+    S.commit_history_index = next_index
+    set_prompt_message(buf, next_index == 0 and S.commit_prompt_draft or messages[next_index])
+  end
+
+  local opts = { buffer = buf, silent = true }
+  vim.keymap.set({ "i", "n" }, "<Esc>", close_commit_prompt, opts)
+  vim.keymap.set({ "i", "n" }, "<CR>", submit, opts)
+  vim.keymap.set("i", "<C-j>", "<CR>", opts)
+  vim.keymap.set("n", "<C-j>", "o", opts)
+  vim.keymap.set({ "i", "n" }, "<Up>", function() history(1) end, opts)
+  vim.keymap.set({ "i", "n" }, "<Down>", function() history(-1) end, opts)
+  vim.cmd("startinsert!")
 end
 
 local function stash()

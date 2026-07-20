@@ -2148,9 +2148,12 @@ function _G.open_lazydata()
     end),
     desc = "Resize fullscreen lazydata float",
   })
+  vim.g.lazydata_session_file = vim.g.lazydata_session_file or vim.fn.tempname()
   local job = vim.fn.termopen({ lazydata }, {
     env = {
       LAZYDATA_SQL = vim.env.NVIM_PORTABLE_LAZYDATA_SQL or vim.env.NVIM_PORTABLE_LAZYDATA_BACKEND or vim.env.LAZYDATA_SQL or vim.env.LAZYDATA_BACKEND,
+      LAZYDATA_EMBEDDED = "1",
+      LAZYDATA_SESSION = vim.g.lazydata_session_file,
     },
     on_exit = vim.schedule_wrap(function()
       pcall(vim.api.nvim_del_autocmd, resize)

@@ -12,7 +12,36 @@ local S = {
 local ns = vim.api.nvim_create_namespace("lazydata")
 local form_ns = vim.api.nvim_create_namespace("lazydata_form")
 local picker_ns = vim.api.nvim_create_namespace("lazydata_picker")
-local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer
+local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer, workspace, connect_profile
+
+local function session_path()
+  if vim.env.LAZYDATA_EMBEDDED ~= "1" then return nil end
+  local path = vim.env.LAZYDATA_SESSION
+  return path and path ~= "" and path or nil
+end
+
+local function read_session()
+  local path = session_path()
+  if not path or vim.fn.filereadable(path) ~= 1 then return nil end
+  local ok, value = pcall(vim.json.decode, table.concat(vim.fn.readfile(path), "\n"))
+  return ok and type(value) == "table" and value or nil
+end
+
+local function write_session()
+  local path = session_path()
+  if not path or not S.profile then return end
+  local item = workspace()
+  local state = { profile_id = S.profile.id, database = S.database }
+  if item and item.kind == "table" then
+    state.schema, state.table = item.schema, item.table
+    state.mode, state.page, state.active_col = item.mode, item.page, item.active_col
+    state.raw_where, state.predicates, state.column_filter = item.raw_where, item.predicates, item.column_filter
+    if S.main.win and vim.api.nvim_win_is_valid(S.main.win) and vim.api.nvim_win_get_buf(S.main.win) == item.buf then
+      state.view = vim.fn.winsaveview()
+    end
+  end
+  pcall(vim.fn.writefile, { vim.json.encode(state) }, path)
+end
 
 local function notify(message, level)
   vim.notify(message, level or vim.log.levels.INFO, { title = "lazydata" })
@@ -146,7 +175,7 @@ local function selected_table()
   return visible[S.table_index], visible
 end
 
-local function workspace() return S.workspaces[S.workspace_index] end
+workspace = function() return S.workspaces[S.workspace_index] end
 
 local function title_tabs()
   if #S.workspaces == 0 then return " No open tables · Enter opens selected table " end
@@ -339,7 +368,13 @@ local function load_rows(item)
   request("rows", params, function(result, err)
     if err then notify(backend_error(err), vim.log.levels.ERROR); return end
     item.data = result
-    if workspace() == item then render_table(item) end
+    if workspace() == item then
+      render_table(item)
+      if item.restore_view and S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
+        pcall(vim.fn.winrestview, item.restore_view)
+        item.restore_view = nil
+      end
+    end
   end, true)
 end
 
@@ -359,7 +394,7 @@ local function set_main_buffer_maps(buf)
   vim.keymap.set("n", "v", function() open_value_viewer() end, opts)
 end
 
-local function open_table()
+local function open_table(restored)
   local t = selected_table()
   if not t then return end
   for i, item in ipairs(S.workspaces) do
@@ -369,7 +404,10 @@ local function open_table()
   end
   local label = (t.schema ~= "" and t.schema .. "." or "") .. t.name
   local item = { kind="table", title=label, profile=S.profile, database=S.database, schema=t.schema, table=t.name,
-    mode="rows", page=0, predicates={}, raw_where="", buf=make_buf("table/"..label, false) }
+    mode=restored and restored.mode or "rows", page=restored and restored.page or 0, active_col=restored and restored.active_col or 1,
+    restore_view=restored and restored.view or nil, predicates=restored and restored.predicates or {},
+    raw_where=restored and restored.raw_where or "", column_filter=restored and restored.column_filter or "",
+    buf=make_buf("table/"..label, false) }
   configure(item.buf)
   set_main_buffer_maps(item.buf)
   S.workspaces[#S.workspaces + 1] = item; S.workspace_index = #S.workspaces; S.active_panel = "main"
@@ -650,14 +688,20 @@ function M.load_profiles(select_id)
     S.profiles=cfg.connections or {};S.profile_index=1
     if select_id then for i,p in ipairs(S.profiles)do if p.id==select_id then S.profile_index=i;break end end end
     render_profiles()
+    if S.restore and S.restore.profile_id then
+      local restore=S.restore;S.restore=nil
+      local found=false
+      for i,p in ipairs(S.profiles)do if p.id==restore.profile_id then S.profile_index=i;found=true;break end end
+      if found then S.restore=restore;connect_profile() end
+    end
   end)
 end
 
-local function connect_profile()
+connect_profile = function()
   local p=selected_profile();if not p then return end
   request("test",{profile_id=p.id,database=p.database},function(_,err)
     if err then notify(backend_error(err),vim.log.levels.ERROR);return end
-    S.profile=p;S.database=p.driver=="sqlite" and vim.fn.fnamemodify(p.path,":t") or p.database;S.screen="workspace";S.active_panel="sidebar";M.apply_layout(true);M.load_tables()
+    S.profile=p;S.database=p.driver=="sqlite" and vim.fn.fnamemodify(p.path,":t") or (S.restore and S.restore.database or p.database);S.screen="workspace";S.active_panel="sidebar";M.apply_layout(true);M.load_tables()
   end,true)
 end
 
@@ -666,6 +710,12 @@ function M.load_tables()
   request("tables",{profile_id=S.profile.id,database=S.profile.driver=="sqlite" and "" or S.database},function(result,err)
     if err then notify(backend_error(err),vim.log.levels.ERROR);return end
     S.tables=result or {};S.table_index=1;render_tables();render_workspace()
+    if S.restore and S.restore.table then
+      local restore=S.restore;S.restore=nil
+      for i,t in ipairs(S.tables)do
+        if t.name==restore.table and (t.schema or "")==(restore.schema or "") then S.table_index=i;render_tables();open_table(restore);break end
+      end
+    end
   end,true)
 end
 
@@ -871,7 +921,8 @@ function M.launch()
   S.main.buf=make_buf("connections",false);S.sidebar.buf=make_buf("tables",false);S.result.buf=make_buf("results",false)
   configure(S.main.buf);configure(S.sidebar.buf);configure(S.result.buf)
   vim.api.nvim_create_autocmd("VimResized",{group=S.group,callback=function()vim.schedule(function()M.apply_layout(true)end)end})
-  vim.api.nvim_create_autocmd("VimLeavePre",{group=S.group,once=true,callback=function()if S.job and S.job>0 then vim.fn.jobstop(S.job)end end})
+  vim.api.nvim_create_autocmd("VimLeavePre",{group=S.group,once=true,callback=function()write_session();if S.job and S.job>0 then vim.fn.jobstop(S.job)end end})
+  S.restore=read_session()
   S.screen="profiles";S.active_panel="main";M.apply_layout(true);M.load_profiles()
 end
 
