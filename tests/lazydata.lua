@@ -46,7 +46,9 @@ assert(main_mappings.b, "b back-navigation mapping is missing")
 assert(main_mappings.D, "D database-switch mapping is missing")
 vim.api.nvim_feedkeys("?", "x", false)
 assert(state.message_dialog and vim.api.nvim_win_is_valid(state.message_dialog.win), "help did not open in a LazyData dialog")
-assert(#vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false) > 3, "help dialog did not wrap its message")
+local help_lines = vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false)
+assert(#help_lines > 20, "help dialog did not display one keybinding per row")
+assert(vim.tbl_contains(help_lines, "  D switch database"), "help dialog is missing the database keybinding row")
 vim.api.nvim_feedkeys("\r", "x", false)
 assert(state.message_dialog == nil, "Enter did not close the LazyData message dialog")
 
@@ -191,9 +193,13 @@ assert(#vim.api.nvim_tabpage_list_wins(0) == 1, "narrow layout did not collapse"
 vim.o.columns = 120
 lazydata.apply_layout(true)
 
+local table_line = vim.api.nvim_get_current_line()
+vim.api.nvim_win_set_cursor(state.main.win, { vim.api.nvim_win_get_cursor(state.main.win)[1], #table_line - 1 })
+local before_b = vim.api.nvim_win_get_cursor(state.main.win)[2]
 vim.api.nvim_feedkeys("b", "x", false)
-assert(state.screen == "workspace" and state.active_panel == "sidebar", "b did not navigate back to the table list")
-assert(#state.workspaces == 2, "b discarded workspaces when returning to the table list")
+assert(state.active_panel == "main" and vim.api.nvim_win_get_cursor(state.main.win)[2] < before_b, "b did not use native previous-word movement in the table")
+vim.api.nvim_feedkeys("\t", "x", false)
+assert(state.screen == "workspace" and state.active_panel == "sidebar", "Tab did not focus the table list")
 vim.api.nvim_feedkeys("b", "x", false)
 assert(state.screen == "profiles", "b did not navigate back from tables to connections")
 assert(vim.api.nvim_win_get_buf(state.main.win) == state.main.buf, "connections screen kept the table buffer")

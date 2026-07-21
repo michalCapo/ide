@@ -982,12 +982,39 @@ end
 
 local function back_navigation()
   if S.screen~="workspace"then return end
+  local item=workspace()
+  if S.active_panel=="main"and item and item.kind=="table"then vim.cmd("normal! b");return end
   if S.active_panel~="sidebar"then S.active_panel="sidebar";M.apply_layout(true);return end
   show_profiles()
 end
 
 local function show_help()
-  notify("Tab/S-Tab focus · j/k gg/G move · Enter open · 1 rows · 2 columns · c jump to column · v view full value · / search/WHERE · u unique values · f remove filter · F clear · [p/]p page · [t/]t tabs · [r/]r results · X close · Ctrl-E query · Ctrl-R run · Ctrl-C cancel · D database · b back · Backspace connections · R refresh · q quit")
+  notify(table.concat({
+    "Tab/S-Tab  focus panel",
+    "j/k        move",
+    "gg/G       first/last item",
+    "Enter      open",
+    "1          rows",
+    "2          columns",
+    "c          jump to column",
+    "v          view full value",
+    "/          search/WHERE",
+    "u          unique values",
+    "f          remove filter",
+    "F          clear filters",
+    "[p/]p      previous/next page",
+    "[t/]t      previous/next tab",
+    "[r/]r      previous/next result",
+    "X          close tab",
+    "Ctrl-E     new query",
+    "Ctrl-R     run query",
+    "Ctrl-C     cancel query",
+    "D          switch database",
+    "b          previous word / back in lists",
+    "Backspace  connections",
+    "R          refresh",
+    "q          quit",
+  },"\n"))
 end
 
 quit = function()
