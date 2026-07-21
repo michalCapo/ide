@@ -2820,8 +2820,7 @@ _G.nvim_keymap_search_groups = {
       { "<S-F2>", "Select and run a JS/TS configuration" },
       { "<leader>rc", "Select and run a JS/TS configuration" },
       { "<leader>rr", "Restart running application" },
-      { "<leader>rs", "Stop running application" },
-      { "<leader>rk", "Kill running application" },
+      { "<leader>rt", "Terminate running application and close terminal" },
       { "<leader>rl", "Rerun last application" },
       { "<F3>", "Toggle scopes" },
       { "<S-F3>", "Toggle callstack" },
@@ -2839,7 +2838,7 @@ _G.nvim_keymap_search_groups = {
       { "<leader>dO", "Step out" },
       { "<leader>dr", "Open REPL" },
       { "<leader>dl", "Run last debug session" },
-      { "<leader>dt", "Terminate session" },
+      { "<leader>dt", "Terminate debug session and close terminals" },
       { "<leader>dh", "Hover value" },
       { "<leader>de", "Evaluate expression (selection in visual mode)" },
       { "<leader>dy", "Copy runtime value to clipboard" },
@@ -6870,22 +6869,14 @@ local function setup_debugging()
     return true
   end
 
-  local function stop_run_terminal()
-    local run = active_run_terminal
-    if not run or vim.fn.jobwait({ run.job_id }, 0)[1] ~= -1 then
-      vim.notify("No application is running", vim.log.levels.INFO)
-      return
-    end
-    vim.fn.chansend(run.job_id, "\003")
-  end
-
   local function restart_active_run_terminal()
+    vim.cmd.wall()
     if not restart_run_terminal() then
       vim.notify("No application is running", vim.log.levels.INFO)
     end
   end
 
-  local function kill_run_terminal()
+  local function terminate_run_terminal()
     local run = active_run_terminal
     if not run or vim.fn.jobwait({ run.job_id }, 0)[1] ~= -1 then
       vim.notify("No application is running", vim.log.levels.INFO)
@@ -6893,6 +6884,9 @@ local function setup_debugging()
     end
     active_run_terminal = nil
     pcall(vim.fn.jobstop, run.job_id)
+    if vim.api.nvim_buf_is_valid(run.buf) then
+      pcall(vim.api.nvim_buf_delete, run.buf, { force = true })
+    end
   end
 
   local function rerun_last_run_terminal()
@@ -7692,13 +7686,16 @@ local function setup_debugging()
   vim.keymap.set({ "n", "t" }, "<F2>", restart_or_start_debugger,
     { desc = "Restart run/debug session or start debugger" })
 
-  vim.keymap.set("n", "<leader><F2>", function()
+  local function terminate_debug_session()
     dap.terminate({ hierarchy = true })
     dap.disconnect()
     stop_managed_debug_jobs()
     dap.repl.close()
     close_dap_consoles()
-  end, { desc = "Debug stop" })
+  end
+
+  vim.keymap.set("n", "<leader><F2>", terminate_debug_session,
+    { desc = "Debug terminate and close terminals" })
 
   local function select_run_configuration()
     local ft = vim.bo.filetype
@@ -7774,8 +7771,7 @@ local function setup_debugging()
   local run_configuration_map_opts = { desc = "Select and run a JS/TS configuration" }
   vim.keymap.set("n", "<leader>rc", select_run_configuration, run_configuration_map_opts)
   vim.keymap.set("n", "<leader>rr", restart_active_run_terminal, { desc = "Run restart" })
-  vim.keymap.set("n", "<leader>rs", stop_run_terminal, { desc = "Run stop" })
-  vim.keymap.set("n", "<leader>rk", kill_run_terminal, { desc = "Run kill" })
+  vim.keymap.set("n", "<leader>rt", terminate_run_terminal, { desc = "Run terminate and close terminal" })
   vim.keymap.set("n", "<leader>rl", rerun_last_run_terminal, { desc = "Run last" })
   vim.keymap.set("n", "<S-F2>", select_run_configuration, run_configuration_map_opts)
   -- Alacritty's terminfo reports Shift-F2 as F14 (CSI 1;2Q).
@@ -7871,6 +7867,7 @@ local function setup_debugging()
       vim.notify("No active debug session", vim.log.levels.INFO)
       return
     end
+    vim.cmd.wall()
     restart_dap_session()
   end, { desc = "Debug restart" })
   vim.keymap.set("n", "<leader>db", dap.toggle_breakpoint, { desc = "Debug toggle breakpoint" })
@@ -7886,7 +7883,8 @@ local function setup_debugging()
     vim.schedule(resize_dap_console_windows)
   end, { desc = "Debug REPL" })
   vim.keymap.set("n", "<leader>dl", dap.run_last, { desc = "Debug run last" })
-  vim.keymap.set("n", "<leader>dt", dap.terminate, { desc = "Debug terminate" })
+  vim.keymap.set("n", "<leader>dt", terminate_debug_session,
+    { desc = "Debug terminate and close terminals" })
   local function debug_hover(expression)
     if dap.session() == nil then
       vim.notify("No active debug session", vim.log.levels.WARN)
