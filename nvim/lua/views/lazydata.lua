@@ -727,7 +727,7 @@ end
 
 local function search_focused()
   if S.screen=="profiles" then S.profile_filter=input("Filter connections: ",S.profile_filter);S.profile_index=1;render_profiles();return end
-  if S.active_panel=="sidebar" then S.table_filter=input("Filter tables: ",S.table_filter);S.table_index=1;render_tables();return end
+  if S.active_panel=="sidebar" then S.table_filter=input("Filter tables: ","");S.table_index=1;render_tables();return end
   local item=workspace();if not item or item.kind~="table"then return end
   if item.mode=="columns" then item.column_filter=input("Filter columns: ",item.column_filter or "");render_table(item) else item.raw_where=input("WHERE: ",item.raw_where or "");item.page=0;load_rows(item) end
 end
@@ -950,7 +950,7 @@ local function show_profiles()
 end
 
 local function show_help()
-  notify("Tab/S-Tab focus · j/k gg/G move · Enter open · 1 rows · 2 columns · c jump to column · v view full value · / search/WHERE · u unique values · f remove filter · F clear · [p/]p page · [t/]t tabs · [r/]r results · X close · Ctrl-E query · Ctrl-R run · Ctrl-C cancel · b database · Backspace connections · R refresh · q quit")
+  notify("Tab/S-Tab focus · j/k gg/G move · Enter open · 1 rows · 2 columns · c jump to column · v view full value · / search/WHERE · u unique values · f remove filter · F clear · [p/]p page · [t/]t tabs · [r/]r results · X close · Ctrl-E query · Ctrl-R run · Ctrl-C cancel · D database · b/Backspace connections · R refresh · q quit")
 end
 
 quit = function()
@@ -973,14 +973,21 @@ configure = function(buf)
   local function map(modes,key,fn)vim.keymap.set(modes,key,fn,{buffer=buf,silent=true,nowait=true})end
   map("n","j",function()move(1)end);map("n","k",function()move(-1)end);map("n","gg",function()jump(false)end);map("n","G",function()jump(true)end)
   map("n","<Tab>",function()focus(1)end);map("n","<S-Tab>",function()focus(-1)end)
-  local function move_cell(delta)local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then w.active_col=math.max(1,math.min(#(w.columns or {}),(w.active_col or 1)+delta));if S.main.win and vim.api.nvim_win_is_valid(S.main.win)then local cursor=vim.api.nvim_win_get_cursor(S.main.win);local visual_col=(w.cell_starts or{})[w.active_col]or 0;pcall(vim.api.nvim_win_set_cursor,S.main.win,{cursor[1],cell_byte_col(S.main.win,cursor[1],visual_col)})end;render_table(w)else focus(delta)end end
+  local function select_cell_column(w,column)
+    w.active_col=math.max(1,math.min(#(w.cell_starts or {}),column))
+    if S.main.win and vim.api.nvim_win_is_valid(S.main.win)then local cursor=vim.api.nvim_win_get_cursor(S.main.win);local visual_col=(w.cell_starts or{})[w.active_col]or 0;pcall(vim.api.nvim_win_set_cursor,S.main.win,{cursor[1],cell_byte_col(S.main.win,cursor[1],visual_col)})end
+    render_table(w)
+  end
+  local function move_cell(delta)local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then select_cell_column(w,(w.active_col or 1)+delta)else focus(delta)end end
   map("n","h",function()move_cell(-1)end);map("n","l",function()move_cell(1)end)
+  map("n","0",function()local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then select_cell_column(w,1)else vim.cmd("normal! 0")end end)
+  map("n","$",function()local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then select_cell_column(w,#(w.cell_starts or {}))else vim.cmd("normal! $")end end)
   map("n","<CR>",function()if S.screen=="profiles"then connect_profile()elseif S.active_panel=="sidebar"then open_table()end end)
   map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())end end);map("n","d",function()if S.screen=="profiles"then delete_profile()end end)
   map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[p",function()change_page(-1)end);map("n","]p",function()change_page(1)end)
   map("n","[t",function()switch_workspace(-1)end);map("n","]t",function()switch_workspace(1)end);map("n","X",close_workspace)
   map("n","[r",function()switch_result(-1)end);map("n","]r",function()switch_result(1)end)
-  map("n","<C-e>",open_query);map("n","<C-c>",cancel_request);map("n","b",choose_database);map("n","<BS>",show_profiles)
+  map("n","<C-e>",open_query);map("n","<C-c>",cancel_request);map("n","D",choose_database);map("n","b",show_profiles);map("n","<BS>",show_profiles)
   map("n","R",function()local item=workspace();if S.screen=="profiles"then M.load_profiles()elseif S.active_panel=="sidebar"then M.load_tables()elseif item and item.kind=="table"then load_columns(item,function()load_rows(item)end)end end)
   map("n","?",show_help);map("n","q",quit)
 end

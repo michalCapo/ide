@@ -40,6 +40,10 @@ assert(formatted_xml:find('\n  <item id="1">', 1, true), "XML formatter did not 
 assert(not lazydata._format_value("json", [[{"broken":}]]), "invalid JSON was formatted")
 lazydata.launch()
 local state = lazydata._state
+local main_mappings = {}
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.main.buf, "n")) do main_mappings[mapping.lhs] = true end
+assert(main_mappings.b, "b back-navigation mapping is missing")
+assert(main_mappings.D, "D database-switch mapping is missing")
 
 assert(vim.wait(3000, function() return #state.profiles == 1 end, 20), "profiles did not load")
 assert(state.profiles[1].name == "Test SQLite")
@@ -82,6 +86,9 @@ assert(vim.wait(500, function() return picked == "beta" and state.picker == nil 
 vim.api.nvim_feedkeys("\r", "x", false)
 assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 2 end, 20), "table list did not load")
 assert(state.tables[1].name == "people")
+state.table_filter = "people"
+vim.api.nvim_feedkeys("/\r", "x", false)
+assert(state.table_filter == "", "/ did not start with a cleared table filter")
 
 vim.api.nvim_feedkeys("\r", "x", false)
 assert(vim.wait(3000, function()
@@ -111,6 +118,15 @@ vim.api.nvim_feedkeys("k", "x", false)
 cursor = vim.api.nvim_win_get_cursor(state.main.win)
 expected_column = vim.fn.virtcol2col(state.main.win, cursor[1], state.workspaces[1].cell_starts[2] + 1) - 1
 assert(cursor[1] == 3 and cursor[2] == expected_column, "k did not preserve the active table column")
+
+vim.api.nvim_feedkeys("$", "x", false)
+assert(state.workspaces[1].active_col == 3, "$ did not select the last table column")
+vim.api.nvim_feedkeys("h", "x", false)
+assert(state.workspaces[1].active_col == 2, "h did not continue from the column selected by $")
+vim.api.nvim_feedkeys("0", "x", false)
+assert(state.workspaces[1].active_col == 1, "0 did not select the first table column")
+vim.api.nvim_feedkeys("l", "x", false)
+assert(state.workspaces[1].active_col == 2, "l did not continue from the column selected by 0")
 
 vim.api.nvim_feedkeys("u", "x", false)
 assert(vim.wait(3000, function() return state.picker and state.picker.title == "Filter team" end, 20), "distinct-value picker did not open")
