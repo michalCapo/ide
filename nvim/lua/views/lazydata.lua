@@ -834,7 +834,7 @@ end
 
 local function viewer_config(column)
   local width=math.max(1,vim.o.columns-6);local height=math.max(3,vim.o.lines-vim.o.cmdheight-5)
-  return {relative="editor",style="minimal",border="rounded",title=" "..column.name.." ",title_pos="center",footer=" q/Esc close · / search · visual select/yank ",footer_pos="center",width=width,height=height,row=1,col=2,zindex=70}
+  return {relative="editor",style="minimal",border="rounded",title=" "..column.name.." ",title_pos="center",footer=" q/Esc close · = format · / search · visual select/yank ",footer_pos="center",width=width,height=height,row=1,col=2,zindex=70}
 end
 
 local value_type_filetypes={json="json",jsonb="json",xml="xml",html="html",yaml="yaml",yml="yaml",toml="toml",sql="sql",markdown="markdown",md="markdown",javascript="javascript",typescript="typescript",lua="lua",css="css",scss="scss",bash="bash",shell="sh",csv="csv"}
@@ -867,6 +867,53 @@ local function value_filetype(column,text,lines)
   return"text"
 end
 
+local function pretty_json(text)
+  local ok=pcall(vim.json.decode,text);if not ok then return nil,"Invalid JSON"end
+  local out={};local indent=0;local quoted=false;local escaped=false;local function add(value)out[#out+1]=value end
+  for index=1,#text do
+    local char=text:sub(index,index)
+    if quoted then
+      add(char)
+      if escaped then escaped=false elseif char=="\\"then escaped=true elseif char=='"'then quoted=false end
+    elseif char=='"'then quoted=true;add(char)
+    elseif char=="{"or char=="["then indent=indent+1;add(char);add("\n"..string.rep("  ",indent))
+    elseif char=="}"or char=="]"then indent=math.max(0,indent-1);if out[#out]and out[#out]:match("^\n%s*$")then out[#out]="\n"..string.rep("  ",indent)else add("\n"..string.rep("  ",indent))end;add(char)
+    elseif char==","then add(",\n"..string.rep("  ",indent))
+    elseif char==":"then add(": ")
+    elseif not char:match("%s")then add(char)end
+  end
+  return table.concat(out):gsub("{\n[ \t]*}","{}"):gsub("%[\n[ \t]*%]","[]")
+end
+
+local function pretty_xml(text)
+  local tokens={};local position=1
+  while position<=#text do
+    local first,last=text:find("<[^>]+>",position)
+    if not first then local tail=vim.trim(text:sub(position));if tail~=""then tokens[#tokens+1]=tail end;break end
+    local content=vim.trim(text:sub(position,first-1));if content~=""then tokens[#tokens+1]=content end
+    tokens[#tokens+1]=text:sub(first,last);position=last+1
+  end
+  if #tokens<2 or not tokens[1]:match("^<")then return nil,"Invalid XML"end
+  local lines={};local indent=0
+  for _,token in ipairs(tokens)do
+    local closing=token:match("^</")~=nil;local declaration=token:match("^<[%?!]")~=nil;local self_closing=token:sub(-2)=="/>"or declaration
+    if closing then indent=math.max(0,indent-1)end
+    lines[#lines+1]=string.rep("  ",indent)..token
+    if token:match("^<[%a_:][^>]*>$")and not self_closing then indent=indent+1 end
+  end
+  if indent~=0 then return nil,"Invalid XML"end
+  return table.concat(lines,"\n")
+end
+
+local function format_value(filetype,text)
+  if filetype=="json"then return pretty_json(text)end
+  if filetype=="xml"then return pretty_xml(text)end
+  local commands={yaml={"yamlfmt","-"},toml={"taplo","format","-"},sql={"sqlformat","-"},lua={"stylua","-"},sh={"shfmt"},bash={"shfmt"}}
+  local command=commands[filetype]
+  if command and vim.fn.executable(command[1])==1 then local output=vim.fn.system(command,text);if vim.v.shell_error==0 then return output:gsub("\n$","")end;return nil,vim.trim(output)end
+  return nil,"No formatter available for "..filetype
+end
+
 open_value_viewer = function()
   local item=workspace();if not item or item.kind~="table"or item.mode~="rows"or not item.data then return end
   local cursor=S.main.win and vim.api.nvim_win_is_valid(S.main.win)and vim.api.nvim_win_get_cursor(S.main.win)or{3,0};local row_index=cursor[1]-2;local column_index=item.active_col or 1;local row=item.data.rows and item.data.rows[row_index];local column=item.columns and item.columns[column_index]
@@ -883,7 +930,13 @@ open_value_viewer = function()
   vim.wo[viewer.win].number=#lines>1;vim.wo[viewer.win].relativenumber=false;vim.wo[viewer.win].signcolumn="no";vim.wo[viewer.win].wrap=true;vim.wo[viewer.win].linebreak=true;vim.wo[viewer.win].breakindent=true;vim.wo[viewer.win].cursorline=false
   vim.wo[viewer.win].winhighlight="Normal:Normal,NormalNC:Normal,FloatBorder:FloatBorder,FloatTitle:Title,EndOfBuffer:EndOfBuffer"
   local function close_viewer()if S.viewer~=viewer then return end;S.viewer=nil;if viewer.resize_autocmd then pcall(vim.api.nvim_del_autocmd,viewer.resize_autocmd)end;if viewer.win and vim.api.nvim_win_is_valid(viewer.win)then pcall(vim.api.nvim_win_close,viewer.win,true)end;if viewer.return_win and vim.api.nvim_win_is_valid(viewer.return_win)then pcall(vim.api.nvim_set_current_win,viewer.return_win)end end
-  local opts={buffer=viewer.buf,silent=true,nowait=true};vim.keymap.set("n","q",close_viewer,opts);vim.keymap.set("n","<Esc>",close_viewer,opts)
+  local function format_viewer()
+    local current=table.concat(vim.api.nvim_buf_get_lines(viewer.buf,0,-1,false),"\n");local formatted,err=format_value(filetype,current)
+    if not formatted then notify(err,vim.log.levels.WARN);return end
+    vim.bo[viewer.buf].readonly=false;vim.bo[viewer.buf].modifiable=true;set_lines(viewer.buf,vim.split(formatted,"\n",{plain=true}));vim.bo[viewer.buf].modifiable=false;vim.bo[viewer.buf].readonly=true
+    vim.wo[viewer.win].number=true;pcall(vim.api.nvim_win_set_cursor,viewer.win,{1,0})
+  end
+  local opts={buffer=viewer.buf,silent=true,nowait=true};vim.keymap.set("n","q",close_viewer,opts);vim.keymap.set("n","<Esc>",close_viewer,opts);vim.keymap.set("n","=",format_viewer,opts)
   viewer.resize_autocmd=vim.api.nvim_create_autocmd("VimResized",{callback=function()if S.viewer==viewer and viewer.win and vim.api.nvim_win_is_valid(viewer.win)then vim.api.nvim_win_set_config(viewer.win,viewer_config(column))end end})
 end
 
@@ -963,5 +1016,6 @@ M._state=S
 M._read_looking=read_looking
 M._value_text=value_text
 M._value_filetype=value_filetype
+M._format_value=format_value
 M._open_picker=open_picker
 return M

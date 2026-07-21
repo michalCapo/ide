@@ -32,6 +32,12 @@ assert(lazydata._value_filetype({ type = "jsonb" }, "not yet valid") == "json", 
 assert(lazydata._value_filetype({ type = "text" }, [[<?xml version="1.0"?><root/>]]) == "xml", "XML content was not detected")
 assert(lazydata._value_filetype({ name = "script.sh", type = "text" }, "echo hello") == "sh", "filename hint was not detected")
 assert(lazydata._value_filetype({ type = "text" }, "plain text") == "text", "plain text was misdetected")
+local formatted_json = assert(lazydata._format_value("json", [[{"data":{"id":6,"active":true},"skills":[]}]]))
+assert(formatted_json:find('\n  "data": {', 1, true), "JSON formatter did not indent an object")
+assert(formatted_json:find('\n    "id": 6,', 1, true), "JSON formatter did not indent nested fields")
+local formatted_xml = assert(lazydata._format_value("xml", [[<?xml version="1.0"?><root><item id="1">value</item></root>]]))
+assert(formatted_xml:find('\n  <item id="1">', 1, true), "XML formatter did not indent a child element")
+assert(not lazydata._format_value("json", [[{"broken":}]]), "invalid JSON was formatted")
 lazydata.launch()
 local state = lazydata._state
 
@@ -121,6 +127,9 @@ assert(state.workspaces[1].active_col == 3, "could not select the note column")
 vim.api.nvim_feedkeys("v", "x", false)
 assert(state.viewer and state.viewer.win and vim.api.nvim_win_is_valid(state.viewer.win), "full-value viewer did not open")
 assert(table.concat(vim.api.nvim_buf_get_lines(state.viewer.buf, 0, -1, false), "\n") == "one complete value that is longer than a rendered table cell", "full-value viewer truncated the cell")
+local has_format_mapping = false
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.viewer.buf, "n")) do if mapping.lhs == "=" then has_format_mapping = true break end end
+assert(has_format_mapping, "full-value viewer has no format mapping")
 local viewer_config = vim.api.nvim_win_get_config(state.viewer.win)
 assert(viewer_config.width >= vim.o.columns - 8 and viewer_config.height >= vim.o.lines - vim.o.cmdheight - 7, "full-value viewer is not near fullscreen")
 assert(vim.bo[state.viewer.buf].readonly and not vim.bo[state.viewer.buf].modifiable, "full-value viewer is not read-only")
