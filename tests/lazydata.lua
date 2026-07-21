@@ -47,6 +47,9 @@ assert(main_mappings.D, "D database-switch mapping is missing")
 
 assert(vim.wait(3000, function() return #state.profiles == 1 end, 20), "profiles did not load")
 assert(state.profiles[1].name == "Test SQLite")
+state.profile_filter = "Test"
+vim.api.nvim_feedkeys("/\r", "x", false)
+assert(state.profile_filter == "", "/ did not start with a cleared connection filter")
 
 vim.api.nvim_feedkeys("e", "x", false)
 assert(vim.wait(1000, function() return state.form and state.form.win and vim.api.nvim_win_is_valid(state.form.win) end, 20), "connection dialog did not open")
@@ -99,6 +102,9 @@ assert(#state.workspaces[1].columns == 3)
 assert(state.workspaces[1].columns[1].name == "id", "id is not the first table column")
 assert(state.workspaces[1].data.columns[1] == "id", "id is not the first row-data column")
 assert(#vim.api.nvim_tabpage_list_wins(0) == 1 and state.sidebar.win == nil, "table sidebar did not hide after focusing the table")
+state.workspaces[1].raw_where = "team = 'core'"
+vim.api.nvim_feedkeys("/\r", "x", false)
+assert(vim.wait(3000, function() return state.workspaces[1].raw_where == "" and #state.workspaces[1].data.rows == 3 end, 20), "/ did not start with a cleared WHERE filter")
 
 vim.api.nvim_feedkeys("c", "x", false)
 assert(state.picker and state.picker.title == "Jump to column", "column picker did not open")
@@ -154,6 +160,9 @@ assert(state.viewer == nil and vim.api.nvim_get_current_win() == state.main.win,
 
 vim.api.nvim_feedkeys("2", "x", false)
 assert(state.workspaces[1].mode == "columns")
+state.workspaces[1].column_filter = "team"
+vim.api.nvim_feedkeys("/\r", "x", false)
+assert(state.workspaces[1].column_filter == "", "/ did not start with a cleared column filter")
 vim.api.nvim_feedkeys("1", "x", false)
 assert(state.workspaces[1].mode == "rows")
 
@@ -177,12 +186,15 @@ assert(#vim.api.nvim_tabpage_list_wins(0) == 1, "narrow layout did not collapse"
 vim.o.columns = 120
 lazydata.apply_layout(true)
 
-vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<BS>", true, false, true), "x", false)
-assert(state.screen == "profiles", "Backspace did not return to connections")
+vim.api.nvim_feedkeys("b", "x", false)
+assert(state.screen == "workspace" and state.active_panel == "sidebar", "b did not navigate back to the table list")
+assert(#state.workspaces == 2, "b discarded workspaces when returning to the table list")
+vim.api.nvim_feedkeys("b", "x", false)
+assert(state.screen == "profiles", "b did not navigate back from tables to connections")
 assert(vim.api.nvim_win_get_buf(state.main.win) == state.main.buf, "connections screen kept the table buffer")
 assert(vim.wait(3000, function() return #state.profiles == 1 end, 20), "profiles did not reload")
 vim.api.nvim_feedkeys("\r", "x", false)
-assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 2 end, 20), "reconnect after Backspace failed")
+assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 2 end, 20), "reconnect after back navigation failed")
 
 vim.api.nvim_feedkeys(string.char(5), "x", false)
 assert(vim.wait(1000, function() return #state.workspaces == 3 end, 20), "query tab did not open")

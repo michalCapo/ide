@@ -726,10 +726,10 @@ local function delete_profile()
 end
 
 local function search_focused()
-  if S.screen=="profiles" then S.profile_filter=input("Filter connections: ",S.profile_filter);S.profile_index=1;render_profiles();return end
+  if S.screen=="profiles" then S.profile_filter=input("Filter connections: ","");S.profile_index=1;render_profiles();return end
   if S.active_panel=="sidebar" then S.table_filter=input("Filter tables: ","");S.table_index=1;render_tables();return end
   local item=workspace();if not item or item.kind~="table"then return end
-  if item.mode=="columns" then item.column_filter=input("Filter columns: ",item.column_filter or "");render_table(item) else item.raw_where=input("WHERE: ",item.raw_where or "");item.page=0;load_rows(item) end
+  if item.mode=="columns" then item.column_filter=input("Filter columns: ","");render_table(item) else item.raw_where=input("WHERE: ","");item.page=0;load_rows(item) end
 end
 
 local function current_column(item)
@@ -949,8 +949,14 @@ local function show_profiles()
   S.screen="profiles";S.active_panel="main";M.apply_layout(true);M.load_profiles(S.profile and S.profile.id)
 end
 
+local function back_navigation()
+  if S.screen~="workspace"then return end
+  if S.active_panel~="sidebar"then S.active_panel="sidebar";M.apply_layout(true);return end
+  show_profiles()
+end
+
 local function show_help()
-  notify("Tab/S-Tab focus · j/k gg/G move · Enter open · 1 rows · 2 columns · c jump to column · v view full value · / search/WHERE · u unique values · f remove filter · F clear · [p/]p page · [t/]t tabs · [r/]r results · X close · Ctrl-E query · Ctrl-R run · Ctrl-C cancel · D database · b/Backspace connections · R refresh · q quit")
+  notify("Tab/S-Tab focus · j/k gg/G move · Enter open · 1 rows · 2 columns · c jump to column · v view full value · / search/WHERE · u unique values · f remove filter · F clear · [p/]p page · [t/]t tabs · [r/]r results · X close · Ctrl-E query · Ctrl-R run · Ctrl-C cancel · D database · b back · Backspace connections · R refresh · q quit")
 end
 
 quit = function()
@@ -987,7 +993,7 @@ configure = function(buf)
   map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[p",function()change_page(-1)end);map("n","]p",function()change_page(1)end)
   map("n","[t",function()switch_workspace(-1)end);map("n","]t",function()switch_workspace(1)end);map("n","X",close_workspace)
   map("n","[r",function()switch_result(-1)end);map("n","]r",function()switch_result(1)end)
-  map("n","<C-e>",open_query);map("n","<C-c>",cancel_request);map("n","D",choose_database);map("n","b",show_profiles);map("n","<BS>",show_profiles)
+  map("n","<C-e>",open_query);map("n","<C-c>",cancel_request);map("n","D",choose_database);map("n","b",back_navigation);map("n","<BS>",show_profiles)
   map("n","R",function()local item=workspace();if S.screen=="profiles"then M.load_profiles()elseif S.active_panel=="sidebar"then M.load_tables()elseif item and item.kind=="table"then load_columns(item,function()load_rows(item)end)end end)
   map("n","?",show_help);map("n","q",quit)
 end
