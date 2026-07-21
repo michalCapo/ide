@@ -44,6 +44,11 @@ local main_mappings = {}
 for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.main.buf, "n")) do main_mappings[mapping.lhs] = true end
 assert(main_mappings.b, "b back-navigation mapping is missing")
 assert(main_mappings.D, "D database-switch mapping is missing")
+vim.api.nvim_feedkeys("?", "x", false)
+assert(state.message_dialog and vim.api.nvim_win_is_valid(state.message_dialog.win), "help did not open in a LazyData dialog")
+assert(#vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false) > 3, "help dialog did not wrap its message")
+vim.api.nvim_feedkeys("\r", "x", false)
+assert(state.message_dialog == nil, "Enter did not close the LazyData message dialog")
 
 assert(vim.wait(3000, function() return #state.profiles == 1 end, 20), "profiles did not load")
 assert(state.profiles[1].name == "Test SQLite")

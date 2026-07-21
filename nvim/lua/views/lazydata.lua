@@ -6,7 +6,7 @@ local S = {
   profile = nil, database = nil, tables = {}, table_index = 1, table_filter = "",
   workspaces = {}, workspace_index = 0, active_panel = "sidebar",
   sidebar = {}, main = {}, result = {}, group = nil, current_request = nil,
-  form = nil, picker = nil, viewer = nil,
+  form = nil, picker = nil, viewer = nil, message_dialog = nil,
 }
 
 local ns = vim.api.nvim_create_namespace("lazydata")
@@ -44,7 +44,38 @@ local function write_session()
 end
 
 local function notify(message, level)
-  vim.notify(message, level or vim.log.levels.INFO, { title = "lazydata" })
+  message=tostring(message or"");level=level or vim.log.levels.INFO
+  if S.message_dialog then
+    local previous=S.message_dialog;S.message_dialog=nil
+    if previous.win and vim.api.nvim_win_is_valid(previous.win)then pcall(vim.api.nvim_win_close,previous.win,true)end
+    if previous.buf and vim.api.nvim_buf_is_valid(previous.buf)then pcall(vim.api.nvim_buf_delete,previous.buf,{force=true})end
+  end
+  local width=math.max(24,math.min(76,vim.o.columns-6));local content_width=width-4;local lines={}
+  for _,paragraph in ipairs(vim.split(message,"\n",{plain=true}))do
+    local line=""
+    for word in paragraph:gmatch("%S+")do
+      local candidate=line==""and word or line.." "..word
+      if line~=""and vim.fn.strdisplaywidth(candidate)>content_width then lines[#lines+1]="  "..line;line=word else line=candidate end
+    end
+    lines[#lines+1]="  "..line
+  end
+  if #lines==0 then lines={""}end
+  local max_height=math.max(3,vim.o.lines-vim.o.cmdheight-6);local height=math.max(3,math.min(#lines+2,max_height));local display={""}
+  for _,line in ipairs(lines)do display[#display+1]=line end
+  display[#display+1]=""
+  local buf=vim.api.nvim_create_buf(false,true);vim.bo[buf].buftype="nofile";vim.bo[buf].bufhidden="wipe";vim.bo[buf].swapfile=false
+  vim.api.nvim_buf_set_lines(buf,0,-1,false,display);vim.bo[buf].modifiable=false
+  local title=level>=vim.log.levels.ERROR and" LazyData error "or level>=vim.log.levels.WARN and" LazyData warning "or" LazyData "
+  local return_win=vim.api.nvim_get_current_win()
+  local win=vim.api.nvim_open_win(buf,true,{relative="editor",style="minimal",border="rounded",title=title,title_pos="center",footer=" Enter/Esc/q/b close ",footer_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=80})
+  vim.wo[win].wrap=true;vim.wo[win].linebreak=true;vim.wo[win].cursorline=false;vim.wo[win].number=false;vim.wo[win].relativenumber=false;vim.wo[win].signcolumn="no"
+  local dialog={buf=buf,win=win,return_win=return_win};S.message_dialog=dialog
+  local function close_dialog()
+    if S.message_dialog~=dialog then return end;S.message_dialog=nil
+    if dialog.win and vim.api.nvim_win_is_valid(dialog.win)then pcall(vim.api.nvim_win_close,dialog.win,true)end
+    if dialog.return_win and vim.api.nvim_win_is_valid(dialog.return_win)then pcall(vim.api.nvim_set_current_win,dialog.return_win)end
+  end
+  local opts={buffer=buf,silent=true,nowait=true};for _,key in ipairs({"<CR>","<Esc>","q","b"})do vim.keymap.set("n",key,close_dialog,opts)end
 end
 
 local function setup_highlights()
