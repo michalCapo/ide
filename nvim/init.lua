@@ -833,7 +833,7 @@ do
 end
 
 -- Automatic code completion: suggest from LSP plus nearby/current-file words.
--- Keep it buffer-local so prompt/floating picker popups do not autocomplete.
+-- Supermaven starts with Neovim and remains available across buffer changes.
 require("supermaven-nvim").setup({
   -- The completion mappings below arbitrate between Neovim's popup menu and
   -- Supermaven, so the plugin must not install its own competing mappings.
@@ -843,9 +843,17 @@ require("supermaven-nvim").setup({
     gitrebase = true,
     help = true,
   },
-  condition = function()
-    return vim.bo.buftype ~= "" or not vim.bo.modifiable
+})
+
+vim.api.nvim_create_autocmd("VimEnter", {
+  once = true,
+  callback = function()
+    local api = require("supermaven-nvim.api")
+    if not api.is_running() then
+      api.start()
+    end
   end,
+  desc = "Ensure Supermaven starts with Neovim",
 })
 
 -- Upstream implements :SupermavenStatus as a trace log message, which is
