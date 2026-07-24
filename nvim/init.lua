@@ -913,6 +913,18 @@ local function keycode(keys)
 end
 
 vim.keymap.set("i", "<Tab>", function()
+  local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
+  if ok and suggestion.has_suggestion() then
+    -- Expr mappings run under textlock, while Supermaven applies a text edit.
+    -- Defer the edit until after the mapping has returned to avoid E565.
+    vim.schedule(function()
+      if suggestion.has_suggestion() then
+        suggestion.on_accept_suggestion()
+      end
+    end)
+    return ""
+  end
+
   if vim.fn.pumvisible() == 1 then
     -- With only whitespace before the cursor, Tab means indent even if a stray
     -- popup is open; accepting a completion there is always a mistype.
@@ -925,12 +937,6 @@ vim.keymap.set("i", "<Tab>", function()
       return keycode("<C-y>")
     end
     return keycode("<C-e><Tab>")
-  end
-
-  local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
-  if ok and suggestion.has_suggestion() then
-    suggestion.on_accept_suggestion()
-    return ""
   end
 
   return keycode("<Tab>")
