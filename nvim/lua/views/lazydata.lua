@@ -43,7 +43,7 @@ local function write_session()
   pcall(vim.fn.writefile, { vim.json.encode(state) }, path)
 end
 
-local function notify(message, level)
+local function notify(message, level, preformatted)
   message=tostring(message or"");level=level or vim.log.levels.INFO
   if S.message_dialog then
     local previous=S.message_dialog;S.message_dialog=nil
@@ -52,12 +52,16 @@ local function notify(message, level)
   end
   local width=math.max(24,math.min(76,vim.o.columns-6));local content_width=width-4;local lines={}
   for _,paragraph in ipairs(vim.split(message,"\n",{plain=true}))do
-    local line=""
-    for word in paragraph:gmatch("%S+")do
-      local candidate=line==""and word or line.." "..word
-      if line~=""and vim.fn.strdisplaywidth(candidate)>content_width then lines[#lines+1]="  "..line;line=word else line=candidate end
+    if preformatted then
+      lines[#lines+1]="  "..paragraph
+    else
+      local line=""
+      for word in paragraph:gmatch("%S+")do
+        local candidate=line==""and word or line.." "..word
+        if line~=""and vim.fn.strdisplaywidth(candidate)>content_width then lines[#lines+1]="  "..line;line=word else line=candidate end
+      end
+      lines[#lines+1]="  "..line
     end
-    lines[#lines+1]="  "..line
   end
   if #lines==0 then lines={""}end
   local max_height=math.max(3,vim.o.lines-vim.o.cmdheight-6);local height=math.max(3,math.min(#lines+2,max_height));local display={""}
@@ -298,7 +302,7 @@ local function render_result_set(buf, result)
   result = result or {}
   if not result.columns or #result.columns == 0 then
     set_lines(buf, { "", "  " .. (result.message or "No results") })
-    return {}
+    return {}, {}
   end
   local widths = {}
   for i, name in ipairs(result.columns) do widths[i] = math.min(32, math.max(3, vim.fn.strdisplaywidth(name))) end
@@ -322,9 +326,11 @@ local function render_result_set(buf, result)
   set_lines(buf, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   pcall(vim.api.nvim_buf_add_highlight, buf, ns, "LazyDataHeader", 0, 0, -1)
-  local starts, col = {}, 1
-  for i, width in ipairs(widths) do starts[i], col = col, col + width + 3 end
-  return starts
+  local starts, ends, col = {}, {}, 1
+  for i, width in ipairs(widths) do
+    starts[i], ends[i], col = col, col + width, col + width + 3
+  end
+  return starts, ends
 end
 
 local function filter_summary(item)
@@ -341,6 +347,27 @@ local function cell_byte_col(win,row,visual_col)
   return math.max(0,byte_col-1)
 end
 
+local function reveal_active_column(item)
+  local win=S.main.win
+  if not win or not vim.api.nvim_win_is_valid(win)then return end
+  local index=item.active_col or 1
+  local start_col=(item.cell_starts or{})[index]
+  local end_col=(item.cell_ends or{})[index]
+  if not start_col or not end_col then return end
+  local width=vim.api.nvim_win_get_width(win)
+  vim.api.nvim_win_call(win,function()
+    local view=vim.fn.winsaveview()
+    if start_col<view.leftcol then
+      view.leftcol=start_col
+    elseif end_col>=view.leftcol+width then
+      view.leftcol=math.max(0,end_col-width+1)
+    else
+      return
+    end
+    vim.fn.winrestview(view)
+  end)
+end
+
 local function render_table(item)
   if item.mode == "columns" then
     local rows = {}
@@ -350,9 +377,9 @@ local function render_table(item)
         rows[#rows + 1] = { c.name, c.type, c.nullable and "yes" or "no", c.primary and "primary" or "", value_text(c.default) }
       end
     end
-    item.cell_starts = render_result_set(item.buf, { columns = { "column", "type", "nullable", "key", "default" }, rows = rows })
+    item.cell_starts,item.cell_ends = render_result_set(item.buf, { columns = { "column", "type", "nullable", "key", "default" }, rows = rows })
   else
-    item.cell_starts = render_result_set(item.buf, item.data or { columns = {}, rows = {} })
+    item.cell_starts,item.cell_ends = render_result_set(item.buf, item.data or { columns = {}, rows = {} })
   end
   if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
     vim.api.nvim_win_set_buf(S.main.win, item.buf)
@@ -360,6 +387,7 @@ local function render_table(item)
       local visual_col=(item.cell_starts or {})[item.active_col or 1]or 0
       pcall(vim.api.nvim_win_set_cursor,S.main.win,{3,cell_byte_col(S.main.win,3,visual_col)})
     end
+    reveal_active_column(item)
     local mode = item.mode == "columns" and "columns" or string.format("rows · page %d%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "")
     local column = item.columns and item.columns[item.active_col or 1]
     vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
@@ -488,7 +516,7 @@ local function open_query()
   vim.keymap.set({"n","v"},"<C-r>",execute_query,opts)
   vim.keymap.set({"n","i"},"<C-r>",function() vim.cmd.stopinsert();execute_query() end,opts)
   vim.keymap.set("n","<C-c>",cancel_request or function() end,opts)
-  vim.keymap.set("n","[t",function()switch_workspace(-1)end,opts);vim.keymap.set("n","]t",function()switch_workspace(1)end,opts)
+  vim.keymap.set("n","[b",function()switch_workspace(-1)end,opts);vim.keymap.set("n","]b",function()switch_workspace(1)end,opts)
   vim.keymap.set("n","[r",function()switch_result(-1)end,opts);vim.keymap.set("n","]r",function()switch_result(1)end,opts)
   vim.keymap.set("n","X",close_workspace,opts);vim.keymap.set("n","q",quit or function() end,opts)
   vim.keymap.set("n","<Tab>",function()focus(1)end,opts);vim.keymap.set("n","<S-Tab>",function()focus(-1)end,opts)
@@ -1003,7 +1031,7 @@ local function show_help()
     "f          remove filter",
     "F          clear filters",
     "[p/]p      previous/next page",
-    "[t/]t      previous/next tab",
+    "[b/]b      previous/next tab",
     "[r/]r      previous/next result",
     "X          close tab",
     "Ctrl-E     new query",
@@ -1014,7 +1042,7 @@ local function show_help()
     "Backspace  connections",
     "R          refresh",
     "q          quit",
-  },"\n"))
+  },"\n"),nil,true)
 end
 
 quit = function()
@@ -1049,7 +1077,7 @@ configure = function(buf)
   map("n","<CR>",function()if S.screen=="profiles"then connect_profile()elseif S.active_panel=="sidebar"then open_table()end end)
   map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())end end);map("n","d",function()if S.screen=="profiles"then delete_profile()end end)
   map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[p",function()change_page(-1)end);map("n","]p",function()change_page(1)end)
-  map("n","[t",function()switch_workspace(-1)end);map("n","]t",function()switch_workspace(1)end);map("n","X",close_workspace)
+  map("n","[b",function()switch_workspace(-1)end);map("n","]b",function()switch_workspace(1)end);map("n","X",close_workspace)
   map("n","[r",function()switch_result(-1)end);map("n","]r",function()switch_result(1)end)
   map("n","<C-e>",open_query);map("n","<C-c>",cancel_request);map("n","D",choose_database);map("n","b",back_navigation);map("n","<BS>",show_profiles)
   map("n","R",function()local item=workspace();if S.screen=="profiles"then M.load_profiles()elseif S.active_panel=="sidebar"then M.load_tables()elseif item and item.kind=="table"then load_columns(item,function()load_rows(item)end)end end)

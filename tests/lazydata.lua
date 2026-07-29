@@ -3,8 +3,11 @@ local db = root .. "/people.db"
 vim.fn.mkdir(root .. "/lazydata", "p")
 
 local sqlite = vim.system({ "sqlite3", db, [[
-  CREATE TABLE people (id INTEGER PRIMARY KEY, team TEXT, note TEXT);
-  INSERT INTO people(team, note) VALUES ('core', 'one complete value that is longer than a rendered table cell'), ('core', 'two'), (NULL, 'three');
+  CREATE TABLE people (id INTEGER PRIMARY KEY, team TEXT, note TEXT, employees_sport TEXT, authorization_method TEXT);
+  INSERT INTO people(team, note, employees_sport, authorization_method) VALUES
+    ('core', 'one complete value that is longer than a rendered table cell', 'basketball', 'sms'),
+    ('core', 'two', 'football', 'sms'),
+    (NULL, 'three', 'tennis', 'sms');
   CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT);
   INSERT INTO teams(name) VALUES ('core');
 ]] }, { text = true }):wait()
@@ -48,7 +51,9 @@ vim.api.nvim_feedkeys("?", "x", false)
 assert(state.message_dialog and vim.api.nvim_win_is_valid(state.message_dialog.win), "help did not open in a LazyData dialog")
 local help_lines = vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false)
 assert(#help_lines > 20, "help dialog did not display one keybinding per row")
-assert(vim.tbl_contains(help_lines, "  D switch database"), "help dialog is missing the database keybinding row")
+assert(vim.tbl_contains(help_lines, "  D          switch database"), "help dialog is missing the database keybinding row")
+assert(vim.tbl_contains(help_lines, "  j/k        move"), "help dialog did not preserve shortcut alignment")
+assert(vim.tbl_contains(help_lines, "  Backspace  connections"), "help dialog did not align long shortcuts")
 vim.api.nvim_feedkeys("\r", "x", false)
 assert(state.message_dialog == nil, "Enter did not close the LazyData message dialog")
 
@@ -105,7 +110,7 @@ assert(vim.wait(3000, function()
   local item = state.workspaces[1]
   return item and item.data and #item.data.rows == 3
 end, 20), "table rows did not load")
-assert(#state.workspaces[1].columns == 3)
+assert(#state.workspaces[1].columns == 5)
 assert(state.workspaces[1].columns[1].name == "id", "id is not the first table column")
 assert(state.workspaces[1].data.columns[1] == "id", "id is not the first row-data column")
 assert(#vim.api.nvim_tabpage_list_wins(0) == 1 and state.sidebar.win == nil, "table sidebar did not hide after focusing the table")
@@ -133,11 +138,16 @@ expected_column = vim.fn.virtcol2col(state.main.win, cursor[1], state.workspaces
 assert(cursor[1] == 3 and cursor[2] == expected_column, "k did not preserve the active table column")
 
 vim.api.nvim_feedkeys("$", "x", false)
-assert(state.workspaces[1].active_col == 3, "$ did not select the last table column")
+assert(state.workspaces[1].active_col == 5, "$ did not select the last table column")
+local last_view = vim.fn.winsaveview()
+local last_end = state.workspaces[1].cell_ends[5]
+local last_width = vim.api.nvim_win_get_width(state.main.win)
+assert(last_view.leftcol > 0 and last_end < last_view.leftcol + last_width, string.format("last table column was clipped (leftcol=%d, end=%d, width=%d)", last_view.leftcol, last_end, last_width))
 vim.api.nvim_feedkeys("h", "x", false)
-assert(state.workspaces[1].active_col == 2, "h did not continue from the column selected by $")
+assert(state.workspaces[1].active_col == 4, "h did not continue from the column selected by $")
 vim.api.nvim_feedkeys("0", "x", false)
 assert(state.workspaces[1].active_col == 1, "0 did not select the first table column")
+assert(vim.fn.winsaveview().leftcol <= state.workspaces[1].cell_starts[1], "first table column stayed clipped")
 vim.api.nvim_feedkeys("l", "x", false)
 assert(state.workspaces[1].active_col == 2, "l did not continue from the column selected by 0")
 
@@ -182,9 +192,9 @@ vim.api.nvim_feedkeys("\r", "x", false)
 assert(vim.wait(3000, function() return state.workspaces[2] and state.workspaces[2].data end, 20), "second table did not open")
 assert(state.workspaces[2].table == "teams")
 assert(state.sidebar.win == nil and #vim.api.nvim_tabpage_list_wins(0) == 1, "opening a table did not hide the sidebar")
-vim.api.nvim_feedkeys("[t", "x", false)
+vim.api.nvim_feedkeys("[b", "x", false)
 assert(state.workspace_index == 1)
-vim.api.nvim_feedkeys("]t", "x", false)
+vim.api.nvim_feedkeys("]b", "x", false)
 assert(state.workspace_index == 2)
 
 vim.o.columns = 70

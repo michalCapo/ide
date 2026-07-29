@@ -93,7 +93,7 @@ search or a WHERE clause, `v` to view the complete selected cell in a large
 read-only buffer, and `u` for distinct values from the selected column.
 An `id` column is displayed first. The table sidebar hides while the table has
 focus; press `Tab` to show and focus it again. `[p`/`]p` page data and
-`[t`/`]t` switch open tables or query tabs. `<C-e>` opens a query and `<C-r>` runs it. In the
+`[b`/`]b` switch open tables or query tabs. `<C-e>` opens a query and `<C-r>` runs it. In the
 connection dialog, `<C-t>` tests the connection and `<C-s>` saves it. Press `?`
 inside LazyData for the complete key list.
 
