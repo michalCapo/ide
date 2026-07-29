@@ -877,8 +877,8 @@ vim.o.pumheight = 10
 -- Fuzzy matching lets abbreviations/subsequences rank correctly, e.g.
 -- typing `empname` narrows `employee_name` without needing the full prefix.
 -- Show suggestions without inserting/selecting one automatically; <Tab> accepts
--- explicitly. No "popup" flag: the auto docs window next to the menu triggers
--- extra resolve requests and visual noise while typing.
+-- an LSP completion explicitly. No "popup" flag: the auto docs window next to
+-- the menu triggers extra resolve requests and visual noise while typing.
 vim.o.completeopt = "menuone,fuzzy,noinsert,noselect"
 
 local autocomplete_group = vim.api.nvim_create_augroup("NvimBufferAutocomplete", { clear = true })
@@ -913,18 +913,6 @@ local function keycode(keys)
 end
 
 vim.keymap.set("i", "<Tab>", function()
-  local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
-  if ok and suggestion.has_suggestion() then
-    -- Expr mappings run under textlock, while Supermaven applies a text edit.
-    -- Defer the edit until after the mapping has returned to avoid E565.
-    vim.schedule(function()
-      if suggestion.has_suggestion() then
-        suggestion.on_accept_suggestion()
-      end
-    end)
-    return ""
-  end
-
   if vim.fn.pumvisible() == 1 then
     -- With only whitespace before the cursor, Tab means indent even if a stray
     -- popup is open; accepting a completion there is always a mistype.
@@ -945,9 +933,9 @@ end, { expr = true, desc = "Accept completion or insert tab" })
 vim.keymap.set("i", "<C-j>", function()
   local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
   if ok and suggestion.has_suggestion() then
-    suggestion.on_accept_suggestion_word()
+    suggestion.on_accept_suggestion()
   end
-end, { desc = "Accept next Supermaven word" })
+end, { desc = "Accept Supermaven suggestion" })
 
 vim.keymap.set("i", "<C-]>", function()
   local ok, suggestion = pcall(require, "supermaven-nvim.completion_preview")
