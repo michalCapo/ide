@@ -195,6 +195,8 @@ func (s *Server) handle(req Request) (any, error) {
 		return s.columns(req)
 	case "rows":
 		return s.rows(req)
+	case "delete_rows":
+		return s.deleteRows(req)
 	case "distinct":
 		return s.distinct(req)
 	case "query":
@@ -932,6 +934,88 @@ func (s *Server) rows(req Request) (any, error) {
 		result.Rows = result.Rows[:p.PageSize]
 	}
 	return result, nil
+}
+
+type deleteRowsParams struct {
+	objectParams
+	Rows []map[string]any `json:"rows"`
+}
+
+type deleteRowsResult struct {
+	Deleted int64 `json:"deleted"`
+}
+
+func (s *Server) deleteRows(req Request) (any, error) {
+	p, err := decode[deleteRowsParams](req.Params)
+	if err != nil {
+		return nil, err
+	}
+	if len(p.Rows) == 0 {
+		return nil, &APIError{Code: "no_rows", Message: "No rows were selected for deletion"}
+	}
+	if len(p.Rows) > 1000 {
+		return nil, &APIError{Code: "too_many_rows", Message: "At most 1000 rows can be deleted at once"}
+	}
+	db, profile, err := s.pool(p.ProfileID, p.Database)
+	if err != nil {
+		return nil, err
+	}
+	if profile.ReadOnly {
+		return nil, &APIError{Code: "read_only", Message: "This connection is read-only"}
+	}
+	ctx, done := s.requestContext(req.ID, profile.TimeoutMS)
+	defer done()
+	columns, err := s.columnsFor(ctx, db, profile, p.objectParams)
+	if err != nil {
+		return nil, err
+	}
+	primary := []Column{}
+	for _, column := range columns {
+		if column.Primary {
+			primary = append(primary, column)
+		}
+	}
+	if len(primary) == 0 {
+		return nil, &APIError{Code: "missing_primary_key", Message: "Rows cannot be deleted because this table has no primary key"}
+	}
+	table := qualified(profile.Driver, p.Schema, p.Table)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var deleted int64
+	for _, key := range p.Rows {
+		parts, args := make([]string, 0, len(primary)), make([]any, 0, len(primary))
+		for _, column := range primary {
+			value, ok := key[column.Name]
+			if !ok {
+				return nil, &APIError{Code: "invalid_row_key", Message: "A selected row is missing primary-key column: " + column.Name}
+			}
+			if value == nil {
+				parts = append(parts, quoteIdent(profile.Driver, column.Name)+" IS NULL")
+				continue
+			}
+			args = append(args, value)
+			parts = append(parts, quoteIdent(profile.Driver, column.Name)+" = "+placeholder(profile.Driver, len(args)))
+		}
+		result, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+strings.Join(parts, " AND "), args...)
+		if err != nil {
+			return nil, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected != 1 {
+			return nil, &APIError{Code: "row_changed", Message: "A selected row no longer exists; no rows were deleted"}
+		}
+		deleted += affected
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return deleteRowsResult{Deleted: deleted}, nil
 }
 
 type distinctParams struct {

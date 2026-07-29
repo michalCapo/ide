@@ -129,6 +129,39 @@ func TestSQLiteFullPath(t *testing.T) {
 	if len(multiple) == 0 || len(multiple[len(multiple)-1].Rows) != 1 {
 		t.Fatalf("multiple result sets = %#v", multiple)
 	}
+
+	deleteRequest := func(id string, rows []map[string]any) (any, error) {
+		t.Helper()
+		return s.handle(Request{ID: id, Method: "delete_rows", Params: raw(t, deleteRowsParams{
+			objectParams: objectParams{ProfileID: p.ID, Table: "people"},
+			Rows:         rows,
+		})})
+	}
+	if _, err := deleteRequest("stale-delete", []map[string]any{{"id": int64(1)}, {"id": int64(999)}}); err == nil {
+		t.Fatal("delete with a stale row key succeeded")
+	}
+	afterRollback := query(`SELECT id FROM people ORDER BY id`).([]ResultSet)
+	if len(afterRollback[0].Rows) != 3 {
+		t.Fatalf("stale multi-row delete was not rolled back: %#v", afterRollback)
+	}
+	deletedValue, err := deleteRequest("delete", []map[string]any{{"id": int64(1)}, {"id": int64(3)}})
+	if err != nil || deletedValue.(deleteRowsResult).Deleted != 2 {
+		t.Fatalf("delete rows = %#v, %v", deletedValue, err)
+	}
+	afterDelete := query(`SELECT id FROM people ORDER BY id`).([]ResultSet)
+	if len(afterDelete[0].Rows) != 1 || afterDelete[0].Rows[0][0] != int64(2) {
+		t.Fatalf("unexpected rows after delete: %#v", afterDelete)
+	}
+
+	query(`CREATE TABLE no_key (value TEXT)`)
+	query(`INSERT INTO no_key(value) VALUES ('keep')`)
+	_, err = s.handle(Request{ID: "no-key-delete", Method: "delete_rows", Params: raw(t, deleteRowsParams{
+		objectParams: objectParams{ProfileID: p.ID, Table: "no_key"},
+		Rows:         []map[string]any{{"value": "keep"}},
+	})})
+	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "missing_primary_key" {
+		t.Fatalf("missing primary key error = %#v", err)
+	}
 }
 
 func TestRequestCancellation(t *testing.T) {

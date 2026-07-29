@@ -52,6 +52,8 @@ assert(state.message_dialog and vim.api.nvim_win_is_valid(state.message_dialog.w
 local help_lines = vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false)
 assert(#help_lines > 20, "help dialog did not display one keybinding per row")
 assert(vim.tbl_contains(help_lines, "  D          switch database"), "help dialog is missing the database keybinding row")
+assert(vim.tbl_contains(help_lines, "  Space      mark/unmark row"), "help dialog is missing the row-mark keybinding")
+assert(vim.tbl_contains(help_lines, "  d          delete marked/current row"), "help dialog is missing the row-delete keybinding")
 assert(vim.tbl_contains(help_lines, "  j/k        move"), "help dialog did not preserve shortcut alignment")
 assert(vim.tbl_contains(help_lines, "  Backspace  connections"), "help dialog did not align long shortcuts")
 vim.api.nvim_feedkeys("\r", "x", false)
@@ -225,6 +227,38 @@ vim.api.nvim_buf_set_lines(query.buf, 0, -1, false, { "SELECT team, COUNT(*) AS 
 vim.cmd.stopinsert()
 vim.api.nvim_feedkeys(string.char(18), "x", false)
 assert(vim.wait(3000, function() return query.results and query.results[1] and #query.results[1].rows == 2 end, 20), "query results did not load")
+
+vim.api.nvim_feedkeys("[b[b", "x", false)
+assert(state.workspace_index == 1 and state.workspaces[1].table == "people", "could not return to the people table")
+local table_mappings = {}
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.workspaces[1].buf, "n")) do table_mappings[mapping.lhs] = true end
+assert(table_mappings[" "], "Space row-mark mapping is missing")
+assert(table_mappings.d, "d row-delete mapping is missing")
+vim.api.nvim_win_set_cursor(state.main.win, { 3, 0 })
+vim.api.nvim_feedkeys(" ", "x", false)
+vim.api.nvim_feedkeys("j ", "x", false)
+assert(vim.tbl_count(state.workspaces[1].marked_rows) == 2, "Space did not mark two rows")
+local marked_lines = 0
+for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(state.workspaces[1].buf, -1, 0, -1, { details = true })) do
+  if mark[4].line_hl_group == "LazyDataMarked" then marked_lines = marked_lines + 1 end
+end
+assert(marked_lines == 2, "marked rows were not highlighted")
+local original_confirm = vim.fn.confirm
+local delete_prompt
+vim.fn.confirm = function(prompt, choices, default)
+  delete_prompt = { prompt = prompt, choices = choices, default = default }
+  return 1
+end
+vim.api.nvim_feedkeys("d", "x", false)
+vim.fn.confirm = original_confirm
+assert(delete_prompt and delete_prompt.prompt:find("Delete 2 marked rows", 1, true), "multi-row delete did not request confirmation")
+assert(delete_prompt.choices == "&Delete\n&Cancel" and delete_prompt.default == 2, "delete confirmation did not default to Cancel")
+assert(vim.wait(3000, function()
+  local item = state.workspaces[1]
+  return item.data and #item.data.rows == 1 and item.data.rows[1][1] == 3
+end, 20), "confirmed multi-row delete did not remove the marked rows")
+assert(vim.tbl_count(state.workspaces[1].marked_rows) == 0, "row marks were not cleared after deletion")
+if state.message_dialog then vim.api.nvim_feedkeys("\r", "x", false) end
 
 assert(state.job and state.job > 0, "backend process is not running")
 print("lazydata end-to-end tests: ok")

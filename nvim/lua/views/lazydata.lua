@@ -91,6 +91,7 @@ local function setup_highlights()
   hl(0, "LazyDataError", { link = "DiagnosticError" })
   hl(0, "LazyDataSuccess", { link = "DiagnosticOk" })
   hl(0, "LazyDataSelected", { link = "Visual" })
+  hl(0, "LazyDataMarked", { link = "Visual" })
   hl(0, "LazyDataKey", { link = "Identifier" })
 end
 
@@ -347,6 +348,25 @@ local function cell_byte_col(win,row,visual_col)
   return math.max(0,byte_col-1)
 end
 
+local function row_identity(item, row)
+  local values, key = {}, {}
+  for column_index, column in ipairs(item.columns or {}) do
+    if column.primary then
+      values[#values + 1] = { column.name, row[column_index] }
+      key[column.name] = row[column_index]
+    end
+  end
+  if #values == 0 then return nil end
+  return vim.json.encode(values), key
+end
+
+local function has_primary_key(item)
+  for _, column in ipairs(item.columns or {}) do
+    if column.primary then return true end
+  end
+  return false
+end
+
 local function reveal_active_column(item)
   local win=S.main.win
   if not win or not vim.api.nvim_win_is_valid(win)then return end
@@ -380,6 +400,12 @@ local function render_table(item)
     item.cell_starts,item.cell_ends = render_result_set(item.buf, { columns = { "column", "type", "nullable", "key", "default" }, rows = rows })
   else
     item.cell_starts,item.cell_ends = render_result_set(item.buf, item.data or { columns = {}, rows = {} })
+    for row_index, row in ipairs((item.data and item.data.rows) or {}) do
+      local key = row_identity(item, row)
+      if key and item.marked_rows and item.marked_rows[key] then
+        vim.api.nvim_buf_set_extmark(item.buf, ns, row_index + 1, 0, { line_hl_group = "LazyDataMarked" })
+      end
+    end
   end
   if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
     vim.api.nvim_win_set_buf(S.main.win, item.buf)
@@ -390,7 +416,8 @@ local function render_table(item)
     reveal_active_column(item)
     local mode = item.mode == "columns" and "columns" or string.format("rows · page %d%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "")
     local column = item.columns and item.columns[item.active_col or 1]
-    vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
+    local marked = item.mode == "rows" and vim.tbl_count(item.marked_rows or {}) or 0
+    vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. (marked > 0 and "  marked: " .. marked or "") .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
   end
   decorate()
 end
@@ -427,6 +454,7 @@ local function load_rows(item)
   request("rows", params, function(result, err)
     if err then notify(backend_error(err), vim.log.levels.ERROR); return end
     item.data = result
+    item.marked_rows = {}
     if workspace() == item then
       render_table(item)
       if item.restore_view and S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
@@ -466,7 +494,7 @@ local function open_table(restored)
     mode=restored and restored.mode or "rows", page=restored and restored.page or 0, active_col=restored and restored.active_col or 1,
     restore_view=restored and restored.view or nil, predicates=restored and restored.predicates or {},
     raw_where=restored and restored.raw_where or "", column_filter=restored and restored.column_filter or "",
-    buf=make_buf("table/"..label, false) }
+    marked_rows={}, buf=make_buf("table/"..label, false) }
   configure(item.buf)
   set_main_buffer_maps(item.buf)
   S.workspaces[#S.workspaces + 1] = item; S.workspace_index = #S.workspaces; S.active_panel = "main"
@@ -817,6 +845,57 @@ end
 local function clear_filters()local item=workspace();if item and item.kind=="table"then item.raw_where="";item.predicates={};item.page=0;load_rows(item)end end
 local function change_page(delta)local item=workspace();if not item or item.kind~="table"or item.mode~="rows"then return end;local page=math.max(0,(item.page or 0)+delta);if delta>0 and item.data and not item.data.has_more then return end;item.page=page;load_rows(item)end
 
+local function current_table_row()
+  local item=workspace()
+  if S.active_panel~="main"or not item or item.kind~="table"or item.mode~="rows"or not item.data then return end
+  if not S.main.win or not vim.api.nvim_win_is_valid(S.main.win)or vim.api.nvim_win_get_buf(S.main.win)~=item.buf then return end
+  local row_index=vim.api.nvim_win_get_cursor(S.main.win)[1]-2
+  local row=item.data.rows and item.data.rows[row_index]
+  if not row then return item end
+  local identity,key=row_identity(item,row)
+  return item,identity,key
+end
+
+local function toggle_row_mark()
+  local item,identity,key=current_table_row()
+  if not item then return end
+  if item.profile.read_only then notify("This connection is read-only",vim.log.levels.WARN);return end
+  if not identity then
+    notify(has_primary_key(item)and"Select a data row first"or"Rows cannot be marked because this table has no primary key",vim.log.levels.WARN)
+    return
+  end
+  item.marked_rows=item.marked_rows or{}
+  if item.marked_rows[identity]then item.marked_rows[identity]=nil else item.marked_rows[identity]=key end
+  render_table(item)
+end
+
+local function delete_table_rows()
+  local item,identity,current_key=current_table_row()
+  if not item then return end
+  if item.profile.read_only then notify("This connection is read-only",vim.log.levels.WARN);return end
+  if not identity then
+    notify(has_primary_key(item)and"Select a data row first"or"Rows cannot be deleted because this table has no primary key",vim.log.levels.WARN)
+    return
+  end
+  local rows={}
+  for _,key in pairs(item.marked_rows or{})do rows[#rows+1]=key end
+  if #rows==0 then rows={current_key}end
+  local noun=#rows==1 and"row"or"rows"
+  local marked=#rows>1 and" marked"or""
+  local prompt=string.format("Delete %d%s %s from '%s'?\nThis cannot be undone.",#rows,marked,noun,item.title)
+  if vim.fn.confirm(prompt,"&Delete\n&Cancel",2)~=1 then return end
+  local displayed=item.data and #(item.data.rows or{})or 0
+  local params=base_params(item);params.rows=rows
+  request("delete_rows",params,function(result,err)
+    if err then notify(backend_error(err),vim.log.levels.ERROR);return end
+    item.marked_rows={}
+    if item.page>0 and #rows>=displayed then item.page=item.page-1 end
+    load_rows(item)
+    local deleted=tonumber(result and result.deleted)or#rows
+    notify(string.format("Deleted %d %s",deleted,deleted==1 and"row"or"rows"))
+  end,true)
+end
+
 local render_picker, close_picker
 
 local function picker_items(picker)
@@ -1024,6 +1103,8 @@ local function show_help()
     "Enter      open",
     "1          rows",
     "2          columns",
+    "Space      mark/unmark row",
+    "d          delete marked/current row",
     "c          jump to column",
     "v          view full value",
     "/          search/WHERE",
@@ -1075,7 +1156,8 @@ configure = function(buf)
   map("n","0",function()local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then select_cell_column(w,1)else vim.cmd("normal! 0")end end)
   map("n","$",function()local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then select_cell_column(w,#(w.cell_starts or {}))else vim.cmd("normal! $")end end)
   map("n","<CR>",function()if S.screen=="profiles"then connect_profile()elseif S.active_panel=="sidebar"then open_table()end end)
-  map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())end end);map("n","d",function()if S.screen=="profiles"then delete_profile()end end)
+  map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())end end)
+  map("n","<Space>",toggle_row_mark);map("n","d",function()if S.screen=="profiles"then delete_profile()else delete_table_rows()end end)
   map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[p",function()change_page(-1)end);map("n","]p",function()change_page(1)end)
   map("n","[b",function()switch_workspace(-1)end);map("n","]b",function()switch_workspace(1)end);map("n","X",close_workspace)
   map("n","[r",function()switch_result(-1)end);map("n","]r",function()switch_result(1)end)

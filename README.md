@@ -90,7 +90,10 @@ stored in plaintext in that file.
 Use `j`/`k` and `gg`/`G` to move, `Tab` to change panels, `Enter` to open a
 table, `1`/`2` for rows/columns, `c` to search and jump to a column, `/` for
 search or a WHERE clause, `v` to view the complete selected cell in a large
-read-only buffer, and `u` for distinct values from the selected column.
+read-only buffer, and `u` for distinct values from the selected column. Press
+`Space` to mark one or more rows and `d` to delete the marked rows after
+confirmation; with no marks, `d` targets the current row. Row deletion requires
+a primary key and is unavailable on read-only connections.
 An `id` column is displayed first. The table sidebar hides while the table has
 focus; press `Tab` to show and focus it again. `[p`/`]p` page data and
 `[b`/`]b` switch open tables or query tabs. `<C-e>` opens a query and `<C-r>` runs it. In the
