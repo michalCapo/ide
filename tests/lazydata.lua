@@ -54,6 +54,9 @@ assert(#help_lines > 20, "help dialog did not display one keybinding per row")
 assert(vim.tbl_contains(help_lines, "  D          switch database"), "help dialog is missing the database keybinding row")
 assert(vim.tbl_contains(help_lines, "  Space      mark/unmark row"), "help dialog is missing the row-mark keybinding")
 assert(vim.tbl_contains(help_lines, "  d          delete marked/current row"), "help dialog is missing the row-delete keybinding")
+assert(vim.tbl_contains(help_lines, "  Shift-K    sort ascending by column"), "help dialog is missing ascending sort")
+assert(vim.tbl_contains(help_lines, "  Shift-J    sort descending by column"), "help dialog is missing descending sort")
+assert(vim.tbl_contains(help_lines, "  [[/]]      previous/next page"), "help dialog is missing page keybindings")
 assert(vim.tbl_contains(help_lines, "  j/k        move"), "help dialog did not preserve shortcut alignment")
 assert(vim.tbl_contains(help_lines, "  Backspace  connections"), "help dialog did not align long shortcuts")
 vim.api.nvim_feedkeys("\r", "x", false)
@@ -163,8 +166,32 @@ assert(vim.wait(3000, function() return state.picker == nil and #state.workspace
 vim.api.nvim_feedkeys("F", "x", false)
 assert(vim.wait(3000, function() return #state.workspaces[1].predicates == 0 and #state.workspaces[1].data.rows == 3 end, 20), "distinct-value filter was not cleared")
 
-vim.api.nvim_feedkeys("l", "x", false)
-assert(state.workspaces[1].active_col == 3, "could not select the note column")
+local sort_cursor = vim.api.nvim_win_get_cursor(state.main.win)
+local note_cursor_col = vim.fn.virtcol2col(state.main.win, sort_cursor[1], state.workspaces[1].cell_starts[3] + 1) - 1
+vim.api.nvim_win_set_cursor(state.main.win, { sort_cursor[1], note_cursor_col })
+assert(state.workspaces[1].active_col == 2, "cursor-only sort setup unexpectedly changed the active column")
+vim.api.nvim_feedkeys("K", "x", false)
+assert(vim.wait(3000, function()
+  local item = state.workspaces[1]
+  return item.active_col == 3 and item.sort_column == "note" and item.sort_direction == "asc" and item.data.rows[1][3]:find("one complete", 1, true)
+end, 20), "Shift-K did not sort the cursor column ascending")
+vim.api.nvim_feedkeys("J", "x", false)
+assert(vim.wait(3000, function()
+  local item = state.workspaces[1]
+  return item.sort_column == "note" and item.sort_direction == "desc" and item.data.rows[1][3] == "two"
+end, 20), "Shift-J did not sort the cursor column descending")
+vim.api.nvim_feedkeys("K", "x", false)
+assert(vim.wait(3000, function()
+  local item = state.workspaces[1]
+  return item.sort_direction == "asc" and item.data.rows[1][3]:find("one complete", 1, true)
+end, 20), "Shift-K did not restore ascending sort")
+vim.api.nvim_feedkeys("0K", "x", false)
+assert(vim.wait(3000, function()
+  local item = state.workspaces[1]
+  return item.sort_column == "id" and item.sort_direction == "asc" and item.data.rows[1][1] == 1
+end, 20), "could not restore primary-key order after sorting")
+vim.api.nvim_feedkeys("ll", "x", false)
+assert(state.workspaces[1].active_col == 3, "could not return to the note column after sorting")
 vim.api.nvim_feedkeys("v", "x", false)
 assert(state.viewer and state.viewer.win and vim.api.nvim_win_is_valid(state.viewer.win), "full-value viewer did not open")
 assert(table.concat(vim.api.nvim_buf_get_lines(state.viewer.buf, 0, -1, false), "\n") == "one complete value that is longer than a rendered table cell", "full-value viewer truncated the cell")
@@ -234,6 +261,11 @@ local table_mappings = {}
 for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.workspaces[1].buf, "n")) do table_mappings[mapping.lhs] = true end
 assert(table_mappings[" "], "Space row-mark mapping is missing")
 assert(table_mappings.d, "d row-delete mapping is missing")
+assert(table_mappings.K, "K ascending-sort mapping is missing")
+assert(table_mappings.J, "J descending-sort mapping is missing")
+assert(table_mappings["[["], "[[ previous-page mapping is missing")
+assert(table_mappings["]]"], "]] next-page mapping is missing")
+assert(not table_mappings["[p"] and not table_mappings["]p"], "old page mappings are still present")
 vim.api.nvim_win_set_cursor(state.main.win, { 3, 0 })
 vim.api.nvim_feedkeys(" ", "x", false)
 vim.api.nvim_feedkeys("j ", "x", false)

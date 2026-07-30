@@ -2642,16 +2642,14 @@ vim.keymap.set("n", "<leader><leader>", fuzzy_files, { desc = "Fuzzy find files"
 
 local function fuzzy_buffers()
   local buffers = {}
-  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].buflisted then
-      local name = vim.api.nvim_buf_get_name(bufnr)
-      if name == "" then
-        name = "[No Name]"
-      else
-        name = vim.fn.fnamemodify(name, ":~:.")
-      end
-      table.insert(buffers, { bufnr = bufnr, name = name })
+  for _, bufnr in ipairs(listed_buffers()) do
+    local name = vim.api.nvim_buf_get_name(bufnr)
+    if name == "" then
+      name = "[No Name]"
+    else
+      name = vim.fn.fnamemodify(name, ":~:.")
     end
+    table.insert(buffers, { bufnr = bufnr, name = name })
   end
 
   if #buffers == 0 then

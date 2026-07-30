@@ -800,10 +800,12 @@ func whereClause(driver string, raw string, predicates []Predicate) (string, []a
 
 type rowsParams struct {
 	objectParams
-	RawWhere   string      `json:"raw_where"`
-	Predicates []Predicate `json:"predicates"`
-	Page       int         `json:"page"`
-	PageSize   int         `json:"page_size"`
+	RawWhere      string      `json:"raw_where"`
+	Predicates    []Predicate `json:"predicates"`
+	Page          int         `json:"page"`
+	PageSize      int         `json:"page_size"`
+	SortColumn    string      `json:"sort_column"`
+	SortDirection string      `json:"sort_direction"`
 }
 type ResultSet struct {
 	Columns  []string `json:"columns"`
@@ -891,16 +893,33 @@ func (s *Server) rows(req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	order := ""
-	for _, c := range cols {
-		if c.Primary {
-			if order == "" {
-				order = " ORDER BY "
-			} else {
-				order += ","
-			}
-			order += quoteIdent(profile.Driver, c.Name)
+	orderParts := []string{}
+	sortColumn := strings.TrimSpace(p.SortColumn)
+	sortDirection := strings.ToLower(strings.TrimSpace(p.SortDirection))
+	if sortColumn != "" {
+		if sortDirection != "asc" && sortDirection != "desc" {
+			return nil, &APIError{Code: "invalid_sort", Message: "Sort direction must be asc or desc"}
 		}
+		found := false
+		for _, c := range cols {
+			if c.Name == sortColumn {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, &APIError{Code: "invalid_sort", Message: "Sort column does not exist"}
+		}
+		orderParts = append(orderParts, quoteIdent(profile.Driver, sortColumn)+" "+strings.ToUpper(sortDirection))
+	}
+	for _, c := range cols {
+		if c.Primary && c.Name != sortColumn {
+			orderParts = append(orderParts, quoteIdent(profile.Driver, c.Name))
+		}
+	}
+	order := ""
+	if len(orderParts) > 0 {
+		order = " ORDER BY " + strings.Join(orderParts, ",")
 	}
 	where, args := whereClause(profile.Driver, p.RawWhere, p.Predicates)
 	table := qualified(profile.Driver, p.Schema, p.Table)

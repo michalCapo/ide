@@ -117,6 +117,21 @@ func TestSQLiteFullPath(t *testing.T) {
 	if len(rows.Columns) != 3 || rows.Columns[0] != "id" || rows.Rows[0][0] != int64(1) {
 		t.Fatalf("id is not the first displayed column: %#v", rows)
 	}
+	sortedValue, err := s.handle(Request{ID: "sorted-rows", Method: "rows", Params: raw(t, rowsParams{
+		objectParams: objectParams{ProfileID: p.ID, Table: "people"},
+		PageSize:     10, SortColumn: "note", SortDirection: "desc",
+	})})
+	sorted := sortedValue.(ResultSet)
+	if err != nil || len(sorted.Rows) != 3 || sorted.Rows[0][2] != "two" || sorted.Rows[2][2] != "one" {
+		t.Fatalf("sorted rows = %#v, %v", sorted, err)
+	}
+	_, err = s.handle(Request{ID: "invalid-sort", Method: "rows", Params: raw(t, rowsParams{
+		objectParams: objectParams{ProfileID: p.ID, Table: "people"},
+		PageSize:     10, SortColumn: "missing", SortDirection: "asc",
+	})})
+	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "invalid_sort" {
+		t.Fatalf("invalid sort error = %#v", err)
+	}
 	distinctValue, err := s.handle(Request{ID: "distinct", Method: "distinct", Params: raw(t, distinctParams{rowsParams: rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}}, Column: "team"})})
 	if err != nil || len(distinctValue.([]map[string]any)) != 2 {
 		t.Fatalf("distinct = %#v, %v", distinctValue, err)

@@ -35,6 +35,7 @@ local function write_session()
   if item and item.kind == "table" then
     state.schema, state.table = item.schema, item.table
     state.mode, state.page, state.active_col = item.mode, item.page, item.active_col
+    state.sort_column, state.sort_direction = item.sort_column, item.sort_direction
     state.raw_where, state.predicates, state.column_filter = item.raw_where, item.predicates, item.column_filter
     if S.main.win and vim.api.nvim_win_is_valid(S.main.win) and vim.api.nvim_win_get_buf(S.main.win) == item.buf then
       state.view = vim.fn.winsaveview()
@@ -414,7 +415,8 @@ local function render_table(item)
       pcall(vim.api.nvim_win_set_cursor,S.main.win,{3,cell_byte_col(S.main.win,3,visual_col)})
     end
     reveal_active_column(item)
-    local mode = item.mode == "columns" and "columns" or string.format("rows · page %d%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "")
+    local sort = item.sort_column and item.sort_direction and " · sort " .. item.sort_column .. " " .. (item.sort_direction == "asc" and "↑" or "↓") or ""
+    local mode = item.mode == "columns" and "columns" or string.format("rows · page %d%s%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "", sort)
     local column = item.columns and item.columns[item.active_col or 1]
     local marked = item.mode == "rows" and vim.tbl_count(item.marked_rows or {}) or 0
     vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. (marked > 0 and "  marked: " .. marked or "") .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
@@ -451,6 +453,7 @@ end
 local function load_rows(item)
   local params = base_params(item)
   params.raw_where, params.predicates, params.page, params.page_size = item.raw_where or "", item.predicates or {}, item.page or 0, 200
+  params.sort_column, params.sort_direction = item.sort_column, item.sort_direction
   request("rows", params, function(result, err)
     if err then notify(backend_error(err), vim.log.levels.ERROR); return end
     item.data = result
@@ -475,10 +478,35 @@ end
 
 local function set_main_buffer_maps(buf)
   local opts = { buffer = buf, silent = true, nowait = true }
+  local function cursor_column(item)
+    if not S.main.win or not vim.api.nvim_win_is_valid(S.main.win) then return item.active_col or 1 end
+    local cursor = vim.api.nvim_win_get_cursor(S.main.win)
+    local line = (vim.api.nvim_buf_get_lines(item.buf, cursor[1] - 1, cursor[1], false)[1] or "")
+    local visual_col = vim.fn.strdisplaywidth(line:sub(1, cursor[2]))
+    local best, best_distance = item.active_col or 1, math.huge
+    for index, start_col in ipairs(item.cell_starts or {}) do
+      local end_col = item.cell_ends[index] or start_col
+      if visual_col >= start_col and visual_col < end_col then return index end
+      local distance = visual_col < start_col and start_col - visual_col or visual_col - end_col + 1
+      if distance < best_distance then best, best_distance = index, distance end
+    end
+    return best
+  end
+  local function sort_rows(direction)
+    local item = workspace()
+    if not item or item.kind ~= "table" or item.mode ~= "rows" or S.active_panel ~= "main" then return end
+    item.active_col = cursor_column(item)
+    local column = item.columns and item.columns[item.active_col]
+    if not column then return end
+    item.sort_column, item.sort_direction, item.page = column.name, direction, 0
+    load_rows(item)
+  end
   vim.keymap.set("n", "1", function() local w=workspace();if w and w.kind=="table"then w.mode="rows";render_table(w)end end, opts)
   vim.keymap.set("n", "2", function() local w=workspace();if w and w.kind=="table"then w.mode="columns";render_table(w)end end, opts)
   vim.keymap.set("n", "c", function() jump_to_column() end, opts)
   vim.keymap.set("n", "v", function() open_value_viewer() end, opts)
+  vim.keymap.set("n", "K", function() sort_rows("asc") end, opts)
+  vim.keymap.set("n", "J", function() sort_rows("desc") end, opts)
 end
 
 local function open_table(restored)
@@ -492,6 +520,7 @@ local function open_table(restored)
   local label = (t.schema ~= "" and t.schema .. "." or "") .. t.name
   local item = { kind="table", title=label, profile=S.profile, database=S.database, schema=t.schema, table=t.name,
     mode=restored and restored.mode or "rows", page=restored and restored.page or 0, active_col=restored and restored.active_col or 1,
+    sort_column=restored and restored.sort_column or nil, sort_direction=restored and restored.sort_direction or nil,
     restore_view=restored and restored.view or nil, predicates=restored and restored.predicates or {},
     raw_where=restored and restored.raw_where or "", column_filter=restored and restored.column_filter or "",
     marked_rows={}, buf=make_buf("table/"..label, false) }
@@ -1107,11 +1136,13 @@ local function show_help()
     "d          delete marked/current row",
     "c          jump to column",
     "v          view full value",
+    "Shift-K    sort ascending by column",
+    "Shift-J    sort descending by column",
     "/          search/WHERE",
     "u          unique values",
     "f          remove filter",
     "F          clear filters",
-    "[p/]p      previous/next page",
+    "[[/]]      previous/next page",
     "[b/]b      previous/next tab",
     "[r/]r      previous/next result",
     "X          close tab",
@@ -1158,7 +1189,7 @@ configure = function(buf)
   map("n","<CR>",function()if S.screen=="profiles"then connect_profile()elseif S.active_panel=="sidebar"then open_table()end end)
   map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())end end)
   map("n","<Space>",toggle_row_mark);map("n","d",function()if S.screen=="profiles"then delete_profile()else delete_table_rows()end end)
-  map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[p",function()change_page(-1)end);map("n","]p",function()change_page(1)end)
+  map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[[",function()change_page(-1)end);map("n","]]",function()change_page(1)end)
   map("n","[b",function()switch_workspace(-1)end);map("n","]b",function()switch_workspace(1)end);map("n","X",close_workspace)
   map("n","[r",function()switch_result(-1)end);map("n","]r",function()switch_result(1)end)
   map("n","<C-e>",open_query);map("n","<C-c>",cancel_request);map("n","D",choose_database);map("n","b",back_navigation);map("n","<BS>",show_profiles)
