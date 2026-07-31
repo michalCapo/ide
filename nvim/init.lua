@@ -2817,8 +2817,8 @@ _G.nvim_keymap_search_groups = {
     items = {
       { "<F2>", "Save all + select/start/continue/restart debugger" },
       { "<leader><F2>", "Stop debug session" },
-      { "<S-F2>", "Select and run a JS/TS configuration" },
-      { "<leader>rc", "Select and run a JS/TS configuration" },
+      { "<S-F2>", "Select and run a JS/TS/Go configuration" },
+      { "<leader>rc", "Select and run a JS/TS/Go configuration" },
       { "<leader>rr", "Restart running application" },
       { "<leader>rt", "Terminate running application and close terminal" },
       { "<leader>rl", "Rerun last application" },
@@ -6984,6 +6984,20 @@ local function setup_debugging()
   vim.fn.sign_define("DapStopped", { text = "▶", texthl = "DapStoppedSign", linehl = "DapStoppedLine", numhl = "DapStoppedNumber" })
   vim.fn.sign_define("DapBreakpointRejected", { text = "○", texthl = "DapBreakpointRejectedSign", linehl = "DapBreakpointLine", numhl = "DapBreakpointNumber" })
 
+  local function go_project_root()
+    local root = vim.fs.root(0, { "go.work", "go.mod", ".git" })
+    if root then
+      return root
+    end
+    local directory = vim.fn.expand("%:p:h")
+    return directory ~= "" and directory or vim.fn.getcwd()
+  end
+
+  local function go_package_dir()
+    local directory = vim.fn.expand("%:p:h")
+    return directory ~= "" and directory or go_project_root()
+  end
+
   dap.adapters.go = function(callback, config_dap)
     if vim.fn.executable("dlv") ~= 1 then
       vim.notify("dlv not found. Install Delve: go install github.com/go-delve/delve/cmd/dlv@latest", vim.log.levels.ERROR)
@@ -7000,9 +7014,9 @@ local function setup_debugging()
   end
 
   dap.configurations.go = {
-    { type = "go", name = "Debug package", request = "launch", program = "${fileDirname}", outputMode = "remote" },
+    { type = "go", name = "Debug app (current package)", request = "launch", program = go_package_dir, cwd = go_project_root, outputMode = "remote" },
     { type = "go", name = "Debug current file", request = "launch", program = "${file}", outputMode = "remote" },
-    { type = "go", name = "Debug test", request = "launch", mode = "test", program = "${fileDirname}", outputMode = "remote" },
+    { type = "go", name = "Debug test", request = "launch", mode = "test", program = go_package_dir, cwd = go_project_root, outputMode = "remote" },
     { type = "go", name = "Attach to process", request = "attach", mode = "local", processId = require("dap.utils").pick_process },
   }
 
@@ -7699,50 +7713,85 @@ local function setup_debugging()
 
   local function select_run_configuration()
     local ft = vim.bo.filetype
-    if ft ~= "javascript" and ft ~= "javascriptreact" and ft ~= "typescript" and ft ~= "typescriptreact" then
-      vim.notify("Not a JS/TS file", vim.log.levels.WARN)
+    local file = vim.fn.expand("%:p")
+    local runners
+    local cwd
+    local env
+    if ft == "go" then
+      local package_dir = go_package_dir()
+      cwd = package_dir
+      runners = {
+        {
+          name = "go run . (current package)",
+          executable = "go",
+          command = { "go", "run", "." },
+          title = " go run . ",
+        },
+        {
+          name = "go run current file",
+          executable = "go",
+          command = { "go", "run", file },
+          title = " go run current file ",
+        },
+        {
+          name = "go test . (current package)",
+          executable = "go",
+          command = { "go", "test", "." },
+          title = " go test . ",
+        },
+        {
+          name = "go test ./... (project)",
+          executable = "go",
+          command = { "go", "test", "./..." },
+          title = " go test ./... ",
+          cwd = go_project_root(),
+        },
+      }
+    elseif ft == "javascript" or ft == "javascriptreact" or ft == "typescript" or ft == "typescriptreact" then
+      cwd = js_debug_cwd()
+      env = node_debug_env
+      runners = {
+        {
+          name = "node --import tsx",
+          executable = "node",
+          command = { "node", "--no-warnings", "--import", "tsx", file },
+          title = " node --import tsx ",
+        },
+        {
+          name = "node --import tsx --watch",
+          executable = "node",
+          command = { "node", "--watch", "--no-warnings", "--import", "tsx", file },
+          title = " node --import tsx --watch ",
+        },
+        {
+          name = "bun",
+          executable = "bun",
+          command = { "bun", file },
+          title = " bun ",
+        },
+        {
+          name = "bun --watch",
+          executable = "bun",
+          command = { "bun", "--watch", file },
+          title = " bun --watch ",
+        },
+        {
+          name = "bun test",
+          executable = "bun",
+          command = { "bun", "test", file },
+          title = " bun test ",
+        },
+        {
+          name = "npm start",
+          executable = "npm",
+          command = { "npm", "start" },
+          title = " npm start ",
+        },
+      }
+    else
+      vim.notify("Run configurations support JS, TS, and Go files", vim.log.levels.WARN)
       return
     end
-
-    local file = vim.fn.expand("%:p")
-    local runners = {
-      {
-        name = "node --import tsx",
-        executable = "node",
-        command = { "node", "--no-warnings", "--import", "tsx", file },
-        title = " node --import tsx ",
-      },
-      {
-        name = "node --import tsx --watch",
-        executable = "node",
-        command = { "node", "--watch", "--no-warnings", "--import", "tsx", file },
-        title = " node --import tsx --watch ",
-      },
-      {
-        name = "bun",
-        executable = "bun",
-        command = { "bun", file },
-        title = " bun ",
-      },
-      {
-        name = "bun --watch",
-        executable = "bun",
-        command = { "bun", "--watch", file },
-        title = " bun --watch ",
-      },
-      {
-        name = "bun test",
-        executable = "bun",
-        command = { "bun", "test", file },
-        title = " bun test ",
-      },
-      {
-        name = "npm start",
-        executable = "npm",
-        command = { "npm", "start" },
-        title = " npm start ",
-      },
-    }
 
     vim.ui.select(runners, {
       prompt = "Run configuration",
@@ -7762,13 +7811,13 @@ local function setup_debugging()
       vim.cmd.wall()
       open_run_terminal(runner.command, {
         title = runner.title,
-        cwd = js_debug_cwd(),
-        env = node_debug_env,
+        cwd = runner.cwd or cwd,
+        env = env,
       })
     end)
   end
 
-  local run_configuration_map_opts = { desc = "Select and run a JS/TS configuration" }
+  local run_configuration_map_opts = { desc = "Select and run a JS/TS/Go configuration" }
   vim.keymap.set("n", "<leader>rc", select_run_configuration, run_configuration_map_opts)
   vim.keymap.set("n", "<leader>rr", restart_active_run_terminal, { desc = "Run restart" })
   vim.keymap.set("n", "<leader>rt", terminate_run_terminal, { desc = "Run terminate and close terminal" })
