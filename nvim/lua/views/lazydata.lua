@@ -391,7 +391,10 @@ local function reveal_active_column(item)
 end
 
 local function render_table(item)
-  if item.mode == "columns" then
+  if item.loading_rows and item.mode == "rows" and not item.data then
+    item.cell_starts,item.cell_ends = {},{}
+    set_lines(item.buf, { "", "  Loading 30 rows…" })
+  elseif item.mode == "columns" then
     local rows = {}
     local needle = (item.column_filter or ""):lower()
     for _, c in ipairs(item.columns or {}) do
@@ -417,7 +420,7 @@ local function render_table(item)
     end
     reveal_active_column(item)
     local sort = item.sort_column and item.sort_direction and " · sort " .. item.sort_column .. " " .. (item.sort_direction == "asc" and "↑" or "↓") or ""
-    local mode = item.mode == "columns" and "columns" or string.format("rows · page %d%s%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "", sort)
+    local mode = item.mode == "columns" and "columns" or item.loading_rows and "rows · executing query…" or string.format("rows · page %d%s%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "", sort)
     local column = item.columns and item.columns[item.active_col or 1]
     local marked = item.mode == "rows" and vim.tbl_count(item.marked_rows or {}) or 0
     vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. (marked > 0 and "  marked: " .. marked or "") .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
@@ -455,8 +458,18 @@ local function load_rows(item)
   local params = base_params(item)
   params.raw_where, params.predicates, params.page, params.page_size = item.raw_where or "", item.predicates or {}, item.page or 0, TABLE_PAGE_SIZE
   params.sort_column, params.sort_direction = item.sort_column, item.sort_direction
-  request("rows", params, function(result, err)
-    if err then notify(backend_error(err), vim.log.levels.ERROR); return end
+  item.loading_rows = true
+  if workspace() == item then render_table(item) end
+  local request_id
+  request_id = request("rows", params, function(result, err)
+    if item.rows_request ~= request_id then return end
+    item.rows_request = nil
+    item.loading_rows = false
+    if err then
+      if workspace() == item then render_table(item) end
+      notify(backend_error(err), vim.log.levels.ERROR)
+      return
+    end
     item.data = result
     item.marked_rows = {}
     if workspace() == item then
@@ -467,6 +480,11 @@ local function load_rows(item)
       end
     end
   end, true)
+  item.rows_request = request_id
+  if not request_id then
+    item.loading_rows = false
+    if workspace() == item then render_table(item) end
+  end
 end
 
 local function load_columns(item, after)

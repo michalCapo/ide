@@ -304,10 +304,15 @@ assert(vim.wait(3000, function()
   return item and item.table == "z_paged" and item.data and #item.data.rows == 30 and item.data.has_more
 end, 20), "large table did not stop at the first 30 rows")
 vim.api.nvim_feedkeys("]]", "x", false)
+local paged_item = state.workspaces[4]
+assert(paged_item.loading_rows, "]] did not expose the table loading state")
+assert(vim.wo[state.main.win].statusline:find("executing query", 1, true), "table statusline did not show the running query")
 assert(vim.wait(3000, function()
   local item = state.workspaces[4]
   return item.page == 1 and item.data and #item.data.rows == 5 and item.data.rows[1][1] == 31 and not item.data.has_more
 end, 20), "]] did not load the next 30-row page")
+assert(not paged_item.loading_rows, "table loading state remained after rows loaded")
+assert(not vim.wo[state.main.win].statusline:find("executing query", 1, true), "table loader remained visible after rows loaded")
 
 assert(state.job and state.job > 0, "backend process is not running")
 print("lazydata end-to-end tests: ok")

@@ -97,7 +97,8 @@ confirmation; with no marks, `d` targets the current row. Row deletion requires
 a primary key and is unavailable on read-only connections.
 An `id` column is displayed first. The table sidebar hides while the table has
 focus; press `Tab` to show and focus it again. Tables load 30 rows at a time;
-`[[`/`]]` load the previous or next 30-row page, and
+the table status shows when its query is executing. `[[`/`]]` load the previous
+or next 30-row page, and
 `[b`/`]b` switch open tables or query tabs. `<C-e>` opens a query and `<C-r>` runs it. In the
 connection dialog, `<C-t>` tests the connection and `<C-s>` saves it. Press `?`
 inside LazyData for the complete key list.
