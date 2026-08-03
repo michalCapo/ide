@@ -1,4 +1,5 @@
 local M = {}
+local TABLE_PAGE_SIZE = 30
 
 local S = {
   job = nil, request_seq = 0, pending = {}, stdout_tail = "", busy = 0,
@@ -452,7 +453,7 @@ end
 
 local function load_rows(item)
   local params = base_params(item)
-  params.raw_where, params.predicates, params.page, params.page_size = item.raw_where or "", item.predicates or {}, item.page or 0, 200
+  params.raw_where, params.predicates, params.page, params.page_size = item.raw_where or "", item.predicates or {}, item.page or 0, TABLE_PAGE_SIZE
   params.sort_column, params.sort_direction = item.sort_column, item.sort_direction
   request("rows", params, function(result, err)
     if err then notify(backend_error(err), vim.log.levels.ERROR); return end
@@ -1142,7 +1143,7 @@ local function show_help()
     "u          unique values",
     "f          remove filter",
     "F          clear filters",
-    "[[/]]      previous/next page",
+    "[[/]]      previous/next 30 rows",
     "[b/]b      previous/next tab",
     "[r/]r      previous/next result",
     "X          close tab",

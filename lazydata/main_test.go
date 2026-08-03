@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func TestProfilePersistenceAndPermissions(t *testing.T) {
 		t.Fatalf("config mode = %o", info.Mode().Perm())
 	}
 	cfg, err := s.loadConfig()
-	if err != nil || len(cfg.Connections) != 1 || cfg.PageSize != 200 {
+	if err != nil || len(cfg.Connections) != 1 || cfg.PageSize != tablePageSize {
 		t.Fatalf("unexpected config: %#v, %v", cfg, err)
 	}
 }
@@ -131,6 +132,31 @@ func TestSQLiteFullPath(t *testing.T) {
 	})})
 	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "invalid_sort" {
 		t.Fatalf("invalid sort error = %#v", err)
+	}
+	query(`CREATE TABLE paged (id INTEGER PRIMARY KEY, value TEXT)`)
+	query(`WITH RECURSIVE sequence(id) AS (SELECT 1 UNION ALL SELECT id + 1 FROM sequence WHERE id < 65) INSERT INTO paged(id, value) SELECT id, printf('row-%02d', id) FROM sequence`)
+	page := func(number, size int) ResultSet {
+		t.Helper()
+		value, pageErr := s.handle(Request{ID: fmt.Sprintf("page-%d", number), Method: "rows", Params: raw(t, rowsParams{
+			objectParams: objectParams{ProfileID: p.ID, Table: "paged"},
+			Page:         number, PageSize: size,
+		})})
+		if pageErr != nil {
+			t.Fatal(pageErr)
+		}
+		return value.(ResultSet)
+	}
+	firstPage := page(0, 0)
+	secondPage := page(1, 1000)
+	lastPage := page(2, 0)
+	if len(firstPage.Rows) != tablePageSize || !firstPage.HasMore || firstPage.Rows[0][0] != int64(1) {
+		t.Fatalf("first page = %#v", firstPage)
+	}
+	if len(secondPage.Rows) != tablePageSize || !secondPage.HasMore || secondPage.Rows[0][0] != int64(31) {
+		t.Fatalf("second page = %#v", secondPage)
+	}
+	if len(lastPage.Rows) != 5 || lastPage.HasMore || lastPage.Rows[0][0] != int64(61) {
+		t.Fatalf("last page = %#v", lastPage)
 	}
 	distinctValue, err := s.handle(Request{ID: "distinct", Method: "distinct", Params: raw(t, distinctParams{rowsParams: rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}}, Column: "team"})})
 	if err != nil || len(distinctValue.([]map[string]any)) != 2 {

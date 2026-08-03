@@ -23,7 +23,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const configVersion = 1
+const (
+	configVersion = 1
+	tablePageSize = 30
+)
 
 type Profile struct {
 	ID                     string `json:"id"`
@@ -221,7 +224,7 @@ func (s *Server) handle(req Request) (any, error) {
 }
 
 func defaultConfig() Config {
-	return Config{Version: configVersion, PageSize: 200, Connections: []Profile{}}
+	return Config{Version: configVersion, PageSize: tablePageSize, Connections: []Profile{}}
 }
 
 func (s *Server) loadConfig() (Config, error) {
@@ -245,9 +248,10 @@ func (s *Server) loadConfigUnlocked() (Config, error) {
 	if cfg.Version != configVersion {
 		return Config{}, &APIError{Code: "config_version", Message: fmt.Sprintf("Unsupported connection profile version: %d", cfg.Version)}
 	}
-	if cfg.PageSize <= 0 {
-		cfg.PageSize = 200
-	}
+	// Table browsing deliberately uses small, bounded pages so wide rows cannot
+	// turn opening a table into a large download. Normalize older configurations
+	// that still contain the previous 200-row default.
+	cfg.PageSize = tablePageSize
 	return cfg, nil
 }
 
@@ -877,11 +881,8 @@ func (s *Server) rows(req Request) (any, error) {
 	if p.Page < 0 {
 		p.Page = 0
 	}
-	if p.PageSize <= 0 {
-		p.PageSize = 200
-	}
-	if p.PageSize > 1000 {
-		p.PageSize = 1000
+	if p.PageSize <= 0 || p.PageSize > tablePageSize {
+		p.PageSize = tablePageSize
 	}
 	db, profile, err := s.pool(p.ProfileID, p.Database)
 	if err != nil {

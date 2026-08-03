@@ -10,6 +10,10 @@ local sqlite = vim.system({ "sqlite3", db, [[
     (NULL, 'three', 'tennis', 'sms');
   CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT);
   INSERT INTO teams(name) VALUES ('core');
+  CREATE TABLE z_paged (id INTEGER PRIMARY KEY, value TEXT);
+  WITH RECURSIVE sequence(id) AS (
+    SELECT 1 UNION ALL SELECT id + 1 FROM sequence WHERE id < 35
+  ) INSERT INTO z_paged(id, value) SELECT id, printf('row-%02d', id) FROM sequence;
 ]] }, { text = true }):wait()
 assert(sqlite.code == 0, sqlite.stderr)
 
@@ -56,7 +60,7 @@ assert(vim.tbl_contains(help_lines, "  Space      mark/unmark row"), "help dialo
 assert(vim.tbl_contains(help_lines, "  d          delete marked/current row"), "help dialog is missing the row-delete keybinding")
 assert(vim.tbl_contains(help_lines, "  Shift-K    sort ascending by column"), "help dialog is missing ascending sort")
 assert(vim.tbl_contains(help_lines, "  Shift-J    sort descending by column"), "help dialog is missing descending sort")
-assert(vim.tbl_contains(help_lines, "  [[/]]      previous/next page"), "help dialog is missing page keybindings")
+assert(vim.tbl_contains(help_lines, "  [[/]]      previous/next 30 rows"), "help dialog is missing paged-row keybindings")
 assert(vim.tbl_contains(help_lines, "  j/k        move"), "help dialog did not preserve shortcut alignment")
 assert(vim.tbl_contains(help_lines, "  Backspace  connections"), "help dialog did not align long shortcuts")
 vim.api.nvim_feedkeys("\r", "x", false)
@@ -104,7 +108,7 @@ vim.api.nvim_feedkeys("\r", "x", false)
 assert(vim.wait(500, function() return picked == "beta" and state.picker == nil end, 10), "database picker did not filter and select with Vim keys")
 
 vim.api.nvim_feedkeys("\r", "x", false)
-assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 2 end, 20), "table list did not load")
+assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 3 end, 20), "table list did not load")
 assert(state.tables[1].name == "people")
 state.table_filter = "people"
 vim.api.nvim_feedkeys("/\r", "x", false)
@@ -244,7 +248,7 @@ assert(state.screen == "profiles", "b did not navigate back from tables to conne
 assert(vim.api.nvim_win_get_buf(state.main.win) == state.main.buf, "connections screen kept the table buffer")
 assert(vim.wait(3000, function() return #state.profiles == 1 end, 20), "profiles did not reload")
 vim.api.nvim_feedkeys("\r", "x", false)
-assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 2 end, 20), "reconnect after back navigation failed")
+assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 3 end, 20), "reconnect after back navigation failed")
 
 vim.api.nvim_feedkeys(string.char(5), "x", false)
 assert(vim.wait(1000, function() return #state.workspaces == 3 end, 20), "query tab did not open")
@@ -291,6 +295,19 @@ assert(vim.wait(3000, function()
 end, 20), "confirmed multi-row delete did not remove the marked rows")
 assert(vim.tbl_count(state.workspaces[1].marked_rows) == 0, "row marks were not cleared after deletion")
 if state.message_dialog then vim.api.nvim_feedkeys("\r", "x", false) end
+
+vim.api.nvim_feedkeys("\t", "x", false)
+state.table_index = 3
+vim.api.nvim_feedkeys("\r", "x", false)
+assert(vim.wait(3000, function()
+  local item = state.workspaces[4]
+  return item and item.table == "z_paged" and item.data and #item.data.rows == 30 and item.data.has_more
+end, 20), "large table did not stop at the first 30 rows")
+vim.api.nvim_feedkeys("]]", "x", false)
+assert(vim.wait(3000, function()
+  local item = state.workspaces[4]
+  return item.page == 1 and item.data and #item.data.rows == 5 and item.data.rows[1][1] == 31 and not item.data.has_more
+end, 20), "]] did not load the next 30-row page")
 
 assert(state.job and state.job > 0, "backend process is not running")
 print("lazydata end-to-end tests: ok")
