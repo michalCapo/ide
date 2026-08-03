@@ -92,9 +92,12 @@ table, `1`/`2` for rows/columns, `c` to search and jump to a column, `/` for
 search or a WHERE clause, `v` to view the complete selected cell in a large
 read-only buffer, and `u` for distinct values from the selected column. Use
 `Shift-K`/`Shift-J` to sort the cursor column ascending/descending. Press
-`Space` to mark one or more rows and `d` to delete the marked rows after
-confirmation; with no marks, `d` targets the current row. Row deletion requires
-a primary key and is unavailable on read-only connections.
+`Space` to mark one or more rows. Press `e` to edit the current cell, or to set
+the selected column on every marked row. Cell edits are staged so you can
+change several fields and rows before `<C-s>` executes them together in one
+transaction; `U` discards the staged changes. Press `d` to delete the marked
+rows after confirmation; with no marks, `d` targets the current row. Editing
+and deletion require a primary key and are unavailable on read-only connections.
 An `id` column is displayed first. The table sidebar hides while the table has
 focus; press `Tab` to show and focus it again. Tables load 30 rows at a time.
 The active panel shows operation-specific loading messages for table queries,

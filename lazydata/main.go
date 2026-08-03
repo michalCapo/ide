@@ -200,6 +200,8 @@ func (s *Server) handle(req Request) (any, error) {
 		return s.rows(req)
 	case "delete_rows":
 		return s.deleteRows(req)
+	case "update_rows":
+		return s.updateRows(req)
 	case "distinct":
 		return s.distinct(req)
 	case "query":
@@ -723,7 +725,7 @@ func (s *Server) columnsFor(ctx context.Context, db *sql.DB, profile Profile, p 
 	}
 	var query string
 	if profile.Driver == "postgres" {
-		query = `SELECT c.column_name,c.data_type,c.is_nullable='YES',c.column_default,EXISTS(SELECT 1 FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage ku ON ku.constraint_name=tc.constraint_name AND ku.constraint_schema=tc.constraint_schema WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=c.table_schema AND tc.table_name=c.table_name AND ku.column_name=c.column_name) FROM information_schema.columns c WHERE c.table_schema=$1 AND c.table_name=$2 ORDER BY c.ordinal_position`
+		query = `SELECT c.column_name,pg_catalog.format_type(a.atttypid,a.atttypmod),c.is_nullable='YES',c.column_default,EXISTS(SELECT 1 FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage ku ON ku.constraint_name=tc.constraint_name AND ku.constraint_schema=tc.constraint_schema WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=c.table_schema AND tc.table_name=c.table_name AND ku.column_name=c.column_name) FROM information_schema.columns c JOIN pg_catalog.pg_namespace n ON n.nspname=c.table_schema JOIN pg_catalog.pg_class cl ON cl.relnamespace=n.oid AND cl.relname=c.table_name JOIN pg_catalog.pg_attribute a ON a.attrelid=cl.oid AND a.attname=c.column_name WHERE c.table_schema=$1 AND c.table_name=$2 ORDER BY c.ordinal_position`
 	} else {
 		query = `SELECT c.name,ty.name,c.is_nullable,OBJECT_DEFINITION(c.default_object_id),CASE WHEN ic.column_id IS NULL THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END FROM sys.columns c JOIN sys.types ty ON c.user_type_id=ty.user_type_id LEFT JOIN sys.indexes i ON i.object_id=c.object_id AND i.is_primary_key=1 LEFT JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.column_id=c.column_id WHERE c.object_id=OBJECT_ID(@p1+'.'+@p2) ORDER BY c.column_id`
 	}
@@ -1036,6 +1038,120 @@ func (s *Server) deleteRows(req Request) (any, error) {
 		return nil, err
 	}
 	return deleteRowsResult{Deleted: deleted}, nil
+}
+
+type rowUpdate struct {
+	Key     map[string]any `json:"key"`
+	Changes map[string]any `json:"changes"`
+}
+
+type updateRowsParams struct {
+	objectParams
+	Rows []rowUpdate `json:"rows"`
+}
+
+type updateRowsResult struct {
+	Updated int64 `json:"updated"`
+}
+
+func (s *Server) updateRows(req Request) (any, error) {
+	p, err := decode[updateRowsParams](req.Params)
+	if err != nil {
+		return nil, err
+	}
+	if len(p.Rows) == 0 {
+		return nil, &APIError{Code: "no_rows", Message: "No row changes are ready to save"}
+	}
+	if len(p.Rows) > 1000 {
+		return nil, &APIError{Code: "too_many_rows", Message: "At most 1000 rows can be updated at once"}
+	}
+	db, profile, err := s.pool(p.ProfileID, p.Database)
+	if err != nil {
+		return nil, err
+	}
+	if profile.ReadOnly {
+		return nil, &APIError{Code: "read_only", Message: "This connection is read-only"}
+	}
+	ctx, done := s.requestContext(req.ID, profile.TimeoutMS)
+	defer done()
+	columns, err := s.columnsFor(ctx, db, profile, p.objectParams)
+	if err != nil {
+		return nil, err
+	}
+	primary := []Column{}
+	known := make(map[string]Column, len(columns))
+	for _, column := range columns {
+		known[column.Name] = column
+		if column.Primary {
+			primary = append(primary, column)
+		}
+	}
+	if len(primary) == 0 {
+		return nil, &APIError{Code: "missing_primary_key", Message: "Rows cannot be updated because this table has no primary key"}
+	}
+	table := qualified(profile.Driver, p.Schema, p.Table)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var updated int64
+	for _, row := range p.Rows {
+		if len(row.Changes) == 0 {
+			return nil, &APIError{Code: "no_changes", Message: "A selected row has no changed fields"}
+		}
+		for name := range row.Changes {
+			if _, ok := known[name]; !ok {
+				return nil, &APIError{Code: "invalid_column", Message: "A changed column does not exist: " + name}
+			}
+		}
+
+		setParts, whereParts, args := []string{}, []string{}, []any{}
+		for _, column := range columns {
+			value, changed := row.Changes[column.Name]
+			if !changed {
+				continue
+			}
+			args = append(args, value)
+			valueExpression := placeholder(profile.Driver, len(args))
+			// Values edited in the UI arrive as text. An explicit text-to-column
+			// cast lets PostgreSQL parse integers, timestamps, arrays, enums, and
+			// other native types instead of asking the driver to encode a string
+			// directly as the inferred binary type.
+			if profile.Driver == "postgres" {
+				valueExpression = "CAST(CAST(" + valueExpression + " AS text) AS " + column.Type + ")"
+			}
+			setParts = append(setParts, quoteIdent(profile.Driver, column.Name)+" = "+valueExpression)
+		}
+		for _, column := range primary {
+			value, ok := row.Key[column.Name]
+			if !ok {
+				return nil, &APIError{Code: "invalid_row_key", Message: "A selected row is missing primary-key column: " + column.Name}
+			}
+			if value == nil {
+				whereParts = append(whereParts, quoteIdent(profile.Driver, column.Name)+" IS NULL")
+				continue
+			}
+			args = append(args, value)
+			whereParts = append(whereParts, quoteIdent(profile.Driver, column.Name)+" = "+placeholder(profile.Driver, len(args)))
+		}
+		result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET "+strings.Join(setParts, ", ")+" WHERE "+strings.Join(whereParts, " AND "), args...)
+		if err != nil {
+			return nil, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected != 1 {
+			return nil, &APIError{Code: "row_changed", Message: "A selected row no longer exists; no rows were updated"}
+		}
+		updated += affected
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updateRowsResult{Updated: updated}, nil
 }
 
 type distinctParams struct {

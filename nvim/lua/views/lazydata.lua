@@ -8,13 +8,13 @@ local S = {
   profile = nil, database = nil, tables = {}, table_index = 1, table_filter = "",
   workspaces = {}, workspace_index = 0, active_panel = "sidebar",
   sidebar = {}, main = {}, result = {}, group = nil, current_request = nil,
-  form = nil, picker = nil, viewer = nil, message_dialog = nil,
+  form = nil, picker = nil, viewer = nil, cell_editor = nil, message_dialog = nil,
 }
 
 local ns = vim.api.nvim_create_namespace("lazydata")
 local form_ns = vim.api.nvim_create_namespace("lazydata_form")
 local picker_ns = vim.api.nvim_create_namespace("lazydata_picker")
-local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer, workspace, connect_profile, decorate
+local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer, edit_table_cells, save_table_edits, discard_table_edits, value_filetype, workspace, connect_profile, decorate
 
 local function session_path()
   if vim.env.LAZYDATA_EMBEDDED ~= "1" then return nil end
@@ -46,7 +46,7 @@ local function write_session()
   pcall(vim.fn.writefile, { vim.json.encode(state) }, path)
 end
 
-local function notify(message, level, preformatted)
+local function notify(message, level, preformatted, custom_title)
   message=tostring(message or"");level=level or vim.log.levels.INFO
   if S.message_dialog then
     local previous=S.message_dialog;S.message_dialog=nil
@@ -72,7 +72,7 @@ local function notify(message, level, preformatted)
   display[#display+1]=""
   local buf=vim.api.nvim_create_buf(false,true);vim.bo[buf].buftype="nofile";vim.bo[buf].bufhidden="wipe";vim.bo[buf].swapfile=false
   vim.api.nvim_buf_set_lines(buf,0,-1,false,display);vim.bo[buf].modifiable=false
-  local title=level>=vim.log.levels.ERROR and" LazyData error "or level>=vim.log.levels.WARN and" LazyData warning "or" LazyData "
+  local title=custom_title or(level>=vim.log.levels.ERROR and" LazyData error "or level>=vim.log.levels.WARN and" LazyData warning "or" LazyData ")
   local return_win=vim.api.nvim_get_current_win()
   local win=vim.api.nvim_open_win(buf,true,{relative="editor",style="minimal",border="rounded",title=title,title_pos="center",footer=" Enter/Esc/q/b close ",footer_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=80})
   vim.wo[win].wrap=true;vim.wo[win].linebreak=true;vim.wo[win].cursorline=false;vim.wo[win].number=false;vim.wo[win].relativenumber=false;vim.wo[win].signcolumn="no"
@@ -95,6 +95,7 @@ local function setup_highlights()
   hl(0, "LazyDataSuccess", { link = "DiagnosticOk" })
   hl(0, "LazyDataSelected", { link = "Visual" })
   hl(0, "LazyDataMarked", { link = "Visual" })
+  hl(0, "LazyDataChanged", { link = "DiffChange" })
   hl(0, "LazyDataKey", { link = "Identifier" })
 end
 
@@ -134,6 +135,7 @@ local request_messages = {
   rows = "Executing table query…",
   distinct = "Loading unique values…",
   delete_rows = "Deleting rows…",
+  update_rows = "Saving row changes…",
   query = "Executing SQL query…",
   cancel = "Cancelling query…",
 }
@@ -404,6 +406,32 @@ local function has_primary_key(item)
   return false
 end
 
+local function pending_edit_stats(item)
+  local rows, fields = 0, 0
+  for _, edit in pairs(item.pending_updates or {}) do
+    local count = vim.tbl_count(edit.changes or {})
+    if count > 0 then rows, fields = rows + 1, fields + count end
+  end
+  return rows, fields
+end
+
+local function edited_result(item)
+  if not item.data or vim.tbl_isempty(item.pending_updates or {}) then return item.data end
+  local result = vim.deepcopy(item.data)
+  for row_index, row in ipairs(item.data.rows or {}) do
+    local identity = row_identity(item, row)
+    local edit = identity and item.pending_updates[identity]
+    if edit then
+      for column_index, column in ipairs(item.columns or {}) do
+        if edit.changes[column.name] ~= nil then
+          result.rows[row_index][column_index] = edit.changes[column.name]
+        end
+      end
+    end
+  end
+  return result
+end
+
 local function reveal_active_column(item)
   local win=S.main.win
   if not win or not vim.api.nvim_win_is_valid(win)then return end
@@ -439,10 +467,12 @@ local function render_table(item)
     end
     item.cell_starts,item.cell_ends = render_result_set(item.buf, { columns = { "column", "type", "nullable", "key", "default" }, rows = rows })
   else
-    item.cell_starts,item.cell_ends = render_result_set(item.buf, item.data or { columns = {}, rows = {} })
+    item.cell_starts,item.cell_ends = render_result_set(item.buf, edited_result(item) or { columns = {}, rows = {} })
     for row_index, row in ipairs((item.data and item.data.rows) or {}) do
       local key = row_identity(item, row)
-      if key and item.marked_rows and item.marked_rows[key] then
+      if key and item.pending_updates and item.pending_updates[key] then
+        vim.api.nvim_buf_set_extmark(item.buf, ns, row_index + 1, 0, { line_hl_group = "LazyDataChanged" })
+      elseif key and item.marked_rows and item.marked_rows[key] then
         vim.api.nvim_buf_set_extmark(item.buf, ns, row_index + 1, 0, { line_hl_group = "LazyDataMarked" })
       end
     end
@@ -458,7 +488,9 @@ local function render_table(item)
     local mode = item.mode == "columns" and "columns" or item.loading_rows and "rows · executing query…" or string.format("rows · page %d%s%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "", sort)
     local column = item.columns and item.columns[item.active_col or 1]
     local marked = item.mode == "rows" and vim.tbl_count(item.marked_rows or {}) or 0
-    vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. (marked > 0 and "  marked: " .. marked or "") .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
+    local edited_rows, edited_fields = pending_edit_stats(item)
+    local edited = edited_fields > 0 and string.format("  changed: %d field%s / %d row%s · Ctrl-S save · U discard", edited_fields, edited_fields == 1 and "" or "s", edited_rows, edited_rows == 1 and "" or "s") or ""
+    vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. (marked > 0 and "  marked: " .. marked or "") .. edited .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
   end
   decorate()
 end
@@ -577,7 +609,7 @@ local function open_table(restored)
     sort_column=restored and restored.sort_column or nil, sort_direction=restored and restored.sort_direction or nil,
     restore_view=restored and restored.view or nil, predicates=restored and restored.predicates or {},
     raw_where=restored and restored.raw_where or "", column_filter=restored and restored.column_filter or "",
-    marked_rows={}, buf=make_buf("table/"..label, false) }
+    marked_rows={}, pending_updates={}, buf=make_buf("table/"..label, false) }
   configure(item.buf)
   set_main_buffer_maps(item.buf)
   S.workspaces[#S.workspaces + 1] = item; S.workspace_index = #S.workspaces; S.active_panel = "main"
@@ -653,6 +685,8 @@ end
 close_workspace = function()
   local item=workspace();if not item then return end
   if item.kind=="query" and vim.bo[item.buf].modified and vim.fn.confirm("Discard modified query?","&Discard\n&Keep",2)~=1 then return end
+  local changed=0;if item.kind=="table"then changed=select(2,pending_edit_stats(item))end
+  if changed>0 and vim.fn.confirm("Discard staged row changes and close this table?","&Discard\n&Keep",2)~=1 then return end
   if item.buf and vim.api.nvim_buf_is_valid(item.buf) then vim.api.nvim_buf_delete(item.buf,{force=true}) end
   if item.result_buf and vim.api.nvim_buf_is_valid(item.result_buf) then vim.api.nvim_buf_delete(item.result_buf,{force=true}) end
   table.remove(S.workspaces,S.workspace_index);S.workspace_index=math.min(S.workspace_index,#S.workspaces);M.apply_layout(true)
@@ -944,7 +978,7 @@ local function current_table_row()
   local row=item.data.rows and item.data.rows[row_index]
   if not row then return item end
   local identity,key=row_identity(item,row)
-  return item,identity,key
+  return item,identity,key,row,row_index
 end
 
 local function toggle_row_mark()
@@ -968,9 +1002,9 @@ local function delete_table_rows()
     notify(has_primary_key(item)and"Select a data row first"or"Rows cannot be deleted because this table has no primary key",vim.log.levels.WARN)
     return
   end
-  local rows={}
-  for _,key in pairs(item.marked_rows or{})do rows[#rows+1]=key end
-  if #rows==0 then rows={current_key}end
+  local rows,identities={},{}
+  for marked_identity,marked_key in pairs(item.marked_rows or{})do rows[#rows+1]=marked_key;identities[#identities+1]=marked_identity end
+  if #rows==0 then rows={current_key};identities={identity}end
   local noun=#rows==1 and"row"or"rows"
   local marked=#rows>1 and" marked"or""
   local prompt=string.format("Delete %d%s %s from '%s'?\nThis cannot be undone.",#rows,marked,noun,item.title)
@@ -979,12 +1013,114 @@ local function delete_table_rows()
   local params=base_params(item);params.rows=rows
   request("delete_rows",params,function(result,err)
     if err then notify(backend_error(err),vim.log.levels.ERROR);return end
+    for _,deleted_identity in ipairs(identities)do item.pending_updates[deleted_identity]=nil end
     item.marked_rows={}
     if item.page>0 and #rows>=displayed then item.page=item.page-1 end
     load_rows(item)
     local deleted=tonumber(result and result.deleted)or#rows
     notify(string.format("Deleted %d %s",deleted,deleted==1 and"row"or"rows"))
   end,true)
+end
+
+local function cell_editor_config(editor)
+  local width=math.max(32,math.min(100,vim.o.columns-6))
+  local height=math.max(6,math.min(24,vim.o.lines-vim.o.cmdheight-6))
+  return {relative="editor",style="minimal",border="rounded",title=string.format(" Edit %s · %d %s ",editor.column.name,#editor.targets,#editor.targets==1 and"row"or"rows"),title_pos="center",footer=" Ctrl-S stage · Ctrl-N set NULL · Esc cancel ",footer_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=70}
+end
+
+local function close_cell_editor(editor)
+  if not editor or S.cell_editor~=editor then return end
+  S.cell_editor=nil
+  if editor.resize_autocmd then pcall(vim.api.nvim_del_autocmd,editor.resize_autocmd)end
+  if editor.win and vim.api.nvim_win_is_valid(editor.win)then pcall(vim.api.nvim_win_close,editor.win,true)end
+  if editor.buf and vim.api.nvim_buf_is_valid(editor.buf)then pcall(vim.api.nvim_buf_delete,editor.buf,{force=true})end
+  if editor.return_win and vim.api.nvim_win_is_valid(editor.return_win)then pcall(vim.api.nvim_set_current_win,editor.return_win)end
+end
+
+local function stage_cell_editor(editor,as_null)
+  if S.cell_editor~=editor then return end
+  local value=as_null and vim.NIL or table.concat(vim.api.nvim_buf_get_lines(editor.buf,0,-1,false),"\n")
+  local item=editor.item
+  item.pending_updates=item.pending_updates or{}
+  for _,target in ipairs(editor.targets)do
+    local edit=item.pending_updates[target.identity]or{key=vim.deepcopy(target.key),changes={}}
+    if vim.deep_equal(value,target.original)then edit.changes[editor.column.name]=nil else edit.changes[editor.column.name]=value end
+    if vim.tbl_isempty(edit.changes)then item.pending_updates[target.identity]=nil else item.pending_updates[target.identity]=edit end
+  end
+  close_cell_editor(editor)
+  if workspace()==item then render_table(item)end
+end
+
+edit_table_cells = function()
+  local item,identity,key,row=current_table_row()
+  if not item then return end
+  if item.profile.read_only then notify("This connection is read-only",vim.log.levels.WARN);return end
+  if not identity then notify(has_primary_key(item)and"Select a data row first"or"Rows cannot be edited because this table has no primary key",vim.log.levels.WARN);return end
+  local column=item.columns and item.columns[item.active_col or 1]
+  if not column then notify("Select a column first",vim.log.levels.WARN);return end
+  local targets={}
+  local use_marked=vim.tbl_count(item.marked_rows or{})>0
+  for row_index,source in ipairs(item.data.rows or{})do
+    local source_identity,source_key=row_identity(item,source)
+    if source_identity and ((use_marked and item.marked_rows[source_identity])or(not use_marked and source_identity==identity))then
+      targets[#targets+1]={identity=source_identity,key=source_key,original=source[item.active_col],row_index=row_index}
+    end
+  end
+  if #targets==0 then targets={{identity=identity,key=key,original=row[item.active_col]}}end
+  local first=targets[1]
+  local staged=item.pending_updates and item.pending_updates[first.identity]
+  local value=staged and rawget(staged.changes,column.name)or nil
+  if value==nil then value=first.original end
+  if #targets>1 then
+    for index=2,#targets do
+      local target=targets[index]
+      local target_edit=item.pending_updates and item.pending_updates[target.identity]
+      local target_value=target_edit and rawget(target_edit.changes,column.name)or nil
+      if target_value==nil then target_value=target.original end
+      if not vim.deep_equal(value,target_value)then value="";break end
+    end
+  end
+  local text
+  if value==vim.NIL or value==nil then text=""elseif type(value)=="table"then text=vim.json.encode(value)else text=tostring(value)end
+  local editor={item=item,column=column,targets=targets,return_win=S.main.win}
+  editor.buf=make_buf("cell-editor/"..item.title.."/"..column.name,true)
+  local lines=vim.split(text,"\n",{plain=true});if #lines==0 then lines={""}end
+  vim.api.nvim_buf_set_lines(editor.buf,0,-1,false,lines);vim.bo[editor.buf].modified=false
+  editor.win=vim.api.nvim_open_win(editor.buf,true,cell_editor_config(editor));S.cell_editor=editor
+  vim.wo[editor.win].number=true;vim.wo[editor.win].relativenumber=false;vim.wo[editor.win].signcolumn="no";vim.wo[editor.win].wrap=false
+  vim.bo[editor.buf].filetype=value_filetype and value_filetype(column,text)or"text"
+  local opts={buffer=editor.buf,silent=true,nowait=true}
+  vim.keymap.set("n","<C-s>",function()stage_cell_editor(editor,false)end,opts);vim.keymap.set("i","<C-s>",function()vim.cmd.stopinsert();stage_cell_editor(editor,false)end,opts)
+  vim.keymap.set("n","<C-n>",function()stage_cell_editor(editor,true)end,opts);vim.keymap.set("i","<C-n>",function()vim.cmd.stopinsert();stage_cell_editor(editor,true)end,opts)
+  vim.keymap.set("n","<Esc>",function()close_cell_editor(editor)end,opts);vim.keymap.set("n","q",function()close_cell_editor(editor)end,opts)
+  vim.keymap.set("i","<Esc>",function()vim.cmd.stopinsert();close_cell_editor(editor)end,opts)
+  editor.resize_autocmd=vim.api.nvim_create_autocmd("VimResized",{callback=function()if S.cell_editor==editor then vim.schedule(function()if editor.win and vim.api.nvim_win_is_valid(editor.win)then vim.api.nvim_win_set_config(editor.win,cell_editor_config(editor))end end)end end})
+  vim.api.nvim_win_set_cursor(editor.win,{1,0});vim.cmd.startinsert()
+end
+
+save_table_edits = function()
+  local item=workspace();if not item or item.kind~="table"then return end
+  if item.profile.read_only then notify("This connection is read-only",vim.log.levels.WARN);return end
+  local edited_rows,edited_fields=pending_edit_stats(item)
+  if edited_fields==0 then notify("No row changes to save");return end
+  local prompt=string.format("Execute %d staged field %s across %d %s in '%s'?",edited_fields,edited_fields==1 and"update"or"updates",edited_rows,edited_rows==1 and"row"or"rows",item.title)
+  if vim.fn.confirm(prompt,"&Execute\n&Cancel",2)~=1 then return end
+  local identities={};for identity in pairs(item.pending_updates)do identities[#identities+1]=identity end;table.sort(identities)
+  local rows={};for _,identity in ipairs(identities)do local edit=item.pending_updates[identity];rows[#rows+1]={key=edit.key,changes=edit.changes}end
+  local params=base_params(item);params.rows=rows
+  request("update_rows",params,function(result,err)
+    if err then notify(backend_error(err),vim.log.levels.ERROR);return end
+    item.pending_updates={};item.marked_rows={};load_rows(item)
+    local updated=tonumber(result and result.updated)or edited_rows
+    notify(string.format("Updated %d %s",updated,updated==1 and"row"or"rows"))
+  end,true)
+end
+
+discard_table_edits = function()
+  local item=workspace();if not item or item.kind~="table"then return end
+  local rows,fields=pending_edit_stats(item);if fields==0 then return end
+  if vim.fn.confirm(string.format("Discard %d staged field %s?",fields,fields==1 and"change"or"changes"),"&Discard\n&Keep",2)~=1 then return end
+  item.pending_updates={};render_table(item)
 end
 
 local render_picker, close_picker
@@ -1068,7 +1204,7 @@ end
 
 local value_type_filetypes={json="json",jsonb="json",xml="xml",html="html",yaml="yaml",yml="yaml",toml="toml",sql="sql",markdown="markdown",md="markdown",javascript="javascript",typescript="typescript",lua="lua",css="css",scss="scss",bash="bash",shell="sh",csv="csv"}
 
-local function value_filetype(column,text,lines)
+value_filetype = function(column,text,lines)
   local column_type=(column.type or""):lower():gsub("^%s+",""):gsub("%s+$","")
   local hinted=value_type_filetypes[column_type]or value_type_filetypes[column_type:match("^[%w_]+")or""]
   if not hinted and column_type:find("json",1,true)then hinted="json"end
@@ -1187,40 +1323,43 @@ local function back_navigation()
 end
 
 local function show_help()
-  notify(table.concat({
-    "Tab/S-Tab  focus panel",
-    "j/k        move",
-    "gg/G       first/last item",
-    "Enter      open",
-    "1          rows",
-    "2          columns",
-    "Space      mark/unmark row",
-    "d          delete marked/current row",
-    "c          jump to column",
-    "v          view full value",
-    "Shift-K    sort ascending by column",
-    "Shift-J    sort descending by column",
-    "/          search/WHERE",
-    "u          unique values",
-    "f          remove filter",
-    "F          clear filters",
-    "[[/]]      previous/next 30 rows",
-    "[b/]b      previous/next tab",
-    "[r/]r      previous/next result",
-    "X          close tab",
-    "Ctrl-E     new query",
-    "Ctrl-R     run query",
-    "Ctrl-C     cancel query",
-    "D          switch database",
-    "b          previous word / back in lists",
-    "Backspace  connections",
-    "R          refresh",
-    "q          quit",
-  },"\n"),nil,true)
+  local lines,headings,shortcuts={},{},{}
+  local function group(title,bindings)
+    headings[#headings+1]=#lines+1;lines[#lines+1]=title
+    for _,binding in ipairs(bindings)do
+      shortcuts[#shortcuts+1]={row=#lines+1,length=#binding[1]}
+      lines[#lines+1]=string.format("  %-12s %s",binding[1],binding[2])
+    end
+    lines[#lines+1]=""
+  end
+  group("Navigation",{
+    {"j/k","move"},{"h/l","previous/next column or panel"},{"gg/G","first/last item"},{"0/$","first/last column"},
+    {"Tab/S-Tab","focus panel"},{"Enter","open"},{"b","previous word / back in lists"},{"Backspace","connections"},
+  })
+  group("Table data",{
+    {"1/2","rows/columns"},{"c","jump to column"},{"v","view full value"},{"/","search or WHERE"},
+    {"u","unique values"},{"f/F","remove one/all filters"},{"Shift-K/J","sort ascending/descending"},{"[[/]]","previous/next 30 rows"},
+  })
+  group("Editing",{
+    {"Space","mark/unmark row"},{"e","edit current/marked row cells"},{"Ctrl-S","stage edit / execute table changes"},
+    {"Ctrl-N","stage NULL in cell editor"},{"U","discard staged table changes"},{"d","delete marked/current row"},
+  })
+  group("Queries",{
+    {"Ctrl-E","new query"},{"Ctrl-R","run query"},{"Ctrl-C","cancel query"},{"[r/]r","previous/next result"},
+  })
+  group("Workspace",{
+    {"[b/]b","previous/next tab"},{"X","close tab"},{"D","switch database"},{"R","refresh current view"},{"q","quit"},
+  })
+  table.remove(lines)
+  notify(table.concat(lines,"\n"),nil,true," LazyData keymap ")
+  local dialog=S.message_dialog;if not dialog or not vim.api.nvim_buf_is_valid(dialog.buf)then return end
+  for _,row in ipairs(headings)do vim.api.nvim_buf_set_extmark(dialog.buf,ns,row,2,{end_col=2+#lines[row],hl_group="LazyDataHeader"})end
+  for _,shortcut in ipairs(shortcuts)do vim.api.nvim_buf_set_extmark(dialog.buf,ns,shortcut.row,4,{end_col=4+shortcut.length,hl_group="LazyDataAccent"})end
 end
 
 quit = function()
   for _,item in ipairs(S.workspaces)do if item.kind=="query"and vim.api.nvim_buf_is_valid(item.buf)and vim.bo[item.buf].modified then if vim.fn.confirm("Discard modified queries and quit?","&Quit\n&Cancel",2)~=1 then return end;break end end
+  for _,item in ipairs(S.workspaces)do local fields=0;if item.kind=="table"then fields=select(2,pending_edit_stats(item))end;if fields>0 then if vim.fn.confirm("Discard staged row changes and quit?","&Quit\n&Cancel",2)~=1 then return end;break end end
   if S.busy>0 and vim.fn.confirm("Queries are still running. Cancel and quit?","&Quit\n&Wait",2)~=1 then return end
   vim.cmd("qa!")
 end
@@ -1249,7 +1388,8 @@ configure = function(buf)
   map("n","0",function()local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then select_cell_column(w,1)else vim.cmd("normal! 0")end end)
   map("n","$",function()local w=workspace();if S.active_panel=="main"and w and w.kind=="table"then select_cell_column(w,#(w.cell_starts or {}))else vim.cmd("normal! $")end end)
   map("n","<CR>",function()if S.screen=="profiles"then connect_profile()elseif S.active_panel=="sidebar"then open_table()end end)
-  map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())end end)
+  map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())else edit_table_cells()end end)
+  map("n","<C-s>",save_table_edits);map("n","U",discard_table_edits)
   map("n","<Space>",toggle_row_mark);map("n","d",function()if S.screen=="profiles"then delete_profile()else delete_table_rows()end end)
   map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[[",function()change_page(-1)end);map("n","]]",function()change_page(1)end)
   map("n","[b",function()switch_workspace(-1)end);map("n","]b",function()switch_workspace(1)end);map("n","X",close_workspace)

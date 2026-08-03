@@ -55,14 +55,24 @@ vim.api.nvim_feedkeys("?", "x", false)
 assert(state.message_dialog and vim.api.nvim_win_is_valid(state.message_dialog.win), "help did not open in a LazyData dialog")
 local help_lines = vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false)
 assert(#help_lines > 20, "help dialog did not display one keybinding per row")
-assert(vim.tbl_contains(help_lines, "  D          switch database"), "help dialog is missing the database keybinding row")
-assert(vim.tbl_contains(help_lines, "  Space      mark/unmark row"), "help dialog is missing the row-mark keybinding")
-assert(vim.tbl_contains(help_lines, "  d          delete marked/current row"), "help dialog is missing the row-delete keybinding")
-assert(vim.tbl_contains(help_lines, "  Shift-K    sort ascending by column"), "help dialog is missing ascending sort")
-assert(vim.tbl_contains(help_lines, "  Shift-J    sort descending by column"), "help dialog is missing descending sort")
-assert(vim.tbl_contains(help_lines, "  [[/]]      previous/next 30 rows"), "help dialog is missing paged-row keybindings")
-assert(vim.tbl_contains(help_lines, "  j/k        move"), "help dialog did not preserve shortcut alignment")
-assert(vim.tbl_contains(help_lines, "  Backspace  connections"), "help dialog did not align long shortcuts")
+for _,heading in ipairs({"Navigation","Table data","Editing","Queries","Workspace"})do
+  assert(vim.tbl_contains(help_lines,"  "..heading),"help dialog is missing the "..heading.." group")
+end
+assert(vim.tbl_contains(help_lines, "    D            switch database"), "help dialog is missing the database keybinding row")
+assert(vim.tbl_contains(help_lines, "    Space        mark/unmark row"), "help dialog is missing the row-mark keybinding")
+assert(vim.tbl_contains(help_lines, "    e            edit current/marked row cells"), "help dialog is missing the row-edit keybinding")
+assert(vim.tbl_contains(help_lines, "    Ctrl-S       stage edit / execute table changes"), "help dialog is missing the contextual row-save keybinding")
+assert(vim.tbl_contains(help_lines, "    Ctrl-N       stage NULL in cell editor"), "help dialog is missing the NULL-edit keybinding")
+assert(vim.tbl_contains(help_lines, "    U            discard staged table changes"), "help dialog is missing the row-discard keybinding")
+assert(vim.tbl_contains(help_lines, "    d            delete marked/current row"), "help dialog is missing the row-delete keybinding")
+assert(vim.tbl_contains(help_lines, "    Shift-K/J    sort ascending/descending"), "help dialog is missing grouped sort keybindings")
+assert(vim.tbl_contains(help_lines, "    [[/]]        previous/next 30 rows"), "help dialog is missing paged-row keybindings")
+assert(vim.tbl_contains(help_lines, "    h/l          previous/next column or panel"), "help dialog is missing horizontal navigation")
+assert(vim.tbl_contains(help_lines, "    j/k          move"), "help dialog did not preserve shortcut alignment")
+assert(vim.tbl_contains(help_lines, "    Backspace    connections"), "help dialog did not align long shortcuts")
+local heading_marks=0
+for _,mark in ipairs(vim.api.nvim_buf_get_extmarks(state.message_dialog.buf,-1,0,-1,{details=true}))do if mark[4].hl_group=="LazyDataHeader"then heading_marks=heading_marks+1 end end
+assert(heading_marks==5,"help dialog group headings were not highlighted")
 vim.api.nvim_feedkeys("\r", "x", false)
 assert(state.message_dialog == nil, "Enter did not close the LazyData message dialog")
 
@@ -273,12 +283,42 @@ assert(state.workspace_index == 1 and state.workspaces[1].table == "people", "co
 local table_mappings = {}
 for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.workspaces[1].buf, "n")) do table_mappings[mapping.lhs] = true end
 assert(table_mappings[" "], "Space row-mark mapping is missing")
+assert(table_mappings.e, "e row-edit mapping is missing")
+assert(table_mappings["<C-S>"], "Ctrl-S row-save mapping is missing")
+assert(table_mappings.U, "U row-discard mapping is missing")
 assert(table_mappings.d, "d row-delete mapping is missing")
 assert(table_mappings.K, "K ascending-sort mapping is missing")
 assert(table_mappings.J, "J descending-sort mapping is missing")
 assert(table_mappings["[["], "[[ previous-page mapping is missing")
 assert(table_mappings["]]"], "]] next-page mapping is missing")
 assert(not table_mappings["[p"] and not table_mappings["]p"], "old page mappings are still present")
+vim.api.nvim_win_set_cursor(state.main.win, { 3, 0 })
+vim.api.nvim_feedkeys("0l", "x", false)
+vim.api.nvim_feedkeys(" ", "x", false)
+vim.api.nvim_feedkeys("j ", "x", false)
+vim.api.nvim_feedkeys("e", "x", false)
+assert(state.cell_editor and #state.cell_editor.targets == 2 and state.cell_editor.column.name == "team", "multi-row cell editor did not open for the marked rows")
+vim.cmd.stopinsert()
+vim.api.nvim_buf_set_lines(state.cell_editor.buf, 0, -1, false, { "platform" })
+vim.api.nvim_feedkeys(string.char(19), "x", false)
+assert(state.cell_editor == nil and vim.tbl_count(state.workspaces[1].pending_updates) == 2, "cell editor did not stage both row updates")
+assert(vim.wo[state.main.win].statusline:find("changed: 2 fields / 2 rows", 1, true), "table statusline did not summarize staged updates")
+local update_prompt
+local original_update_confirm = vim.fn.confirm
+vim.fn.confirm = function(prompt, choices, default)
+  update_prompt = { prompt = prompt, choices = choices, default = default }
+  return 1
+end
+vim.api.nvim_feedkeys(string.char(19), "x", false)
+vim.fn.confirm = original_update_confirm
+assert(update_prompt and update_prompt.prompt:find("Execute 2 staged field updates across 2 rows", 1, true), "multi-row update did not request execution confirmation")
+assert(update_prompt.choices == "&Execute\n&Cancel" and update_prompt.default == 2, "update confirmation did not default to Cancel")
+assert(vim.wait(3000, function()
+  local item = state.workspaces[1]
+  return item.data and item.data.rows[1][2] == "platform" and item.data.rows[2][2] == "platform"
+end, 20), "confirmed multi-row update did not persist the new values")
+assert(vim.tbl_count(state.workspaces[1].pending_updates) == 0, "staged updates were not cleared after saving")
+if state.message_dialog then vim.api.nvim_feedkeys("\r", "x", false) end
 vim.api.nvim_win_set_cursor(state.main.win, { 3, 0 })
 vim.api.nvim_feedkeys(" ", "x", false)
 vim.api.nvim_feedkeys("j ", "x", false)

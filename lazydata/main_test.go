@@ -171,6 +171,40 @@ func TestSQLiteFullPath(t *testing.T) {
 		t.Fatalf("multiple result sets = %#v", multiple)
 	}
 
+	updateRequest := func(id string, rows []rowUpdate) (any, error) {
+		t.Helper()
+		return s.handle(Request{ID: id, Method: "update_rows", Params: raw(t, updateRowsParams{
+			objectParams: objectParams{ProfileID: p.ID, Table: "people"},
+			Rows:         rows,
+		})})
+	}
+	updatedValue, err := updateRequest("update", []rowUpdate{
+		{Key: map[string]any{"id": int64(1)}, Changes: map[string]any{"team": "platform", "note": "edited one"}},
+		{Key: map[string]any{"id": int64(2)}, Changes: map[string]any{"team": nil}},
+	})
+	if err != nil || updatedValue.(updateRowsResult).Updated != 2 {
+		t.Fatalf("update rows = %#v, %v", updatedValue, err)
+	}
+	afterUpdate := query(`SELECT id, team, note FROM people ORDER BY id`).([]ResultSet)
+	if afterUpdate[0].Rows[0][1] != "platform" || afterUpdate[0].Rows[0][2] != "edited one" || afterUpdate[0].Rows[1][1] != nil {
+		t.Fatalf("unexpected rows after update: %#v", afterUpdate)
+	}
+	if _, err := updateRequest("stale-update", []rowUpdate{
+		{Key: map[string]any{"id": int64(1)}, Changes: map[string]any{"note": "must roll back"}},
+		{Key: map[string]any{"id": int64(999)}, Changes: map[string]any{"note": "missing"}},
+	}); err == nil {
+		t.Fatal("update with a stale row key succeeded")
+	}
+	afterUpdateRollback := query(`SELECT note FROM people WHERE id = 1`).([]ResultSet)
+	if afterUpdateRollback[0].Rows[0][0] != "edited one" {
+		t.Fatalf("stale multi-row update was not rolled back: %#v", afterUpdateRollback)
+	}
+	if _, err := updateRequest("invalid-column", []rowUpdate{{
+		Key: map[string]any{"id": int64(1)}, Changes: map[string]any{"missing": "value"},
+	}}); err == nil {
+		t.Fatal("update with an unknown column succeeded")
+	}
+
 	deleteRequest := func(id string, rows []map[string]any) (any, error) {
 		t.Helper()
 		return s.handle(Request{ID: id, Method: "delete_rows", Params: raw(t, deleteRowsParams{
@@ -202,6 +236,13 @@ func TestSQLiteFullPath(t *testing.T) {
 	})})
 	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "missing_primary_key" {
 		t.Fatalf("missing primary key error = %#v", err)
+	}
+	_, err = s.handle(Request{ID: "no-key-update", Method: "update_rows", Params: raw(t, updateRowsParams{
+		objectParams: objectParams{ProfileID: p.ID, Table: "no_key"},
+		Rows:         []rowUpdate{{Key: map[string]any{"value": "keep"}, Changes: map[string]any{"value": "changed"}}},
+	})})
+	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "missing_primary_key" {
+		t.Fatalf("missing primary key update error = %#v", err)
 	}
 }
 
