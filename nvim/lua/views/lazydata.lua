@@ -3,6 +3,7 @@ local TABLE_PAGE_SIZE = 30
 
 local S = {
   job = nil, request_seq = 0, pending = {}, stdout_tail = "", busy = 0,
+  loading = {},
   screen = "profiles", profiles = {}, profile_index = 1, profile_filter = "",
   profile = nil, database = nil, tables = {}, table_index = 1, table_filter = "",
   workspaces = {}, workspace_index = 0, active_panel = "sidebar",
@@ -13,7 +14,7 @@ local S = {
 local ns = vim.api.nvim_create_namespace("lazydata")
 local form_ns = vim.api.nvim_create_namespace("lazydata_form")
 local picker_ns = vim.api.nvim_create_namespace("lazydata_picker")
-local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer, workspace, connect_profile
+local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer, workspace, connect_profile, decorate
 
 local function session_path()
   if vim.env.LAZYDATA_EMBEDDED ~= "1" then return nil end
@@ -121,6 +122,31 @@ local function backend_error(err)
   return message
 end
 
+local request_messages = {
+  profiles = "Loading connections…",
+  save_profile = "Saving connection…",
+  delete_profile = "Deleting connection…",
+  test = "Connecting…",
+  test_profile = "Testing connection…",
+  databases = "Loading databases…",
+  tables = "Loading tables…",
+  columns = "Loading columns…",
+  rows = "Executing table query…",
+  distinct = "Loading unique values…",
+  delete_rows = "Deleting rows…",
+  query = "Executing SQL query…",
+  cancel = "Cancelling query…",
+}
+
+local function loading_message()
+  local latest_id, message = -1, nil
+  for id, value in pairs(S.loading) do
+    local number = tonumber(id) or 0
+    if number > latest_id then latest_id, message = number, value end
+  end
+  return message
+end
+
 local function receive_line(line)
   if line == "" then return end
   local ok, response = pcall(vim.json.decode, line)
@@ -131,10 +157,12 @@ local function receive_line(line)
   local pending = S.pending[tostring(response.id or "")]
   if not pending then return end
   S.pending[tostring(response.id)] = nil
+  S.loading[tostring(response.id)] = nil
   S.busy = math.max(0, S.busy - 1)
   if S.current_request == tostring(response.id) then S.current_request = nil end
   vim.schedule(function()
     if response.ok then pending(response.result, nil) else pending(nil, response.error or {}) end
+    if decorate then decorate() end
   end)
 end
 
@@ -168,9 +196,10 @@ local function start_backend()
     end,
     on_exit = function(_, code)
       local pending = S.pending
-      S.pending, S.job, S.busy, S.current_request = {}, nil, 0, nil
+      S.pending, S.loading, S.job, S.busy, S.current_request = {}, {}, nil, 0, nil
       vim.schedule(function()
         for _, callback in pairs(pending) do callback(nil, { message = "Backend stopped", detail = "exit " .. code }) end
+        if decorate then decorate() end
       end)
     end,
   })
@@ -182,12 +211,17 @@ local function request(method, params, callback, tracked)
   S.request_seq = S.request_seq + 1
   local id = tostring(S.request_seq)
   S.pending[id] = callback or function() end
+  S.loading[id] = request_messages[method] or "Working…"
   S.busy = S.busy + 1
   if tracked then S.current_request = id end
+  if decorate then decorate() end
   local payload = vim.json.encode({ id = id, method = method, params = params or {} }) .. "\n"
   if vim.fn.chansend(S.job, payload) == 0 then
     S.pending[id] = nil
+    S.loading[id] = nil
     S.busy = math.max(0, S.busy - 1)
+    if S.current_request == id then S.current_request = nil end
+    if decorate then decorate() end
     notify("Could not write to backend", vim.log.levels.ERROR)
     return nil
   end
@@ -225,8 +259,9 @@ local function title_tabs()
   return table.concat(parts, "│")
 end
 
-local function decorate()
-  local busy = S.busy > 0 and "  [working…]" or ""
+decorate = function()
+  local loading = loading_message()
+  local busy = loading and "  " .. loading or ""
   if S.screen == "profiles" then
     if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
       vim.wo[S.main.win].winbar = " LazyData · Connections" .. busy .. " %= n new · e edit · d delete · Enter connect · ? help "
@@ -241,12 +276,12 @@ local function decorate()
   end
   if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
     local focus = S.active_panel == "main" and "LazyDataAccent" or "LazyDataMuted"
-    vim.wo[S.main.win].winbar = title_tabs()
+    vim.wo[S.main.win].winbar = title_tabs() .. (loading and " %= " .. loading .. " " or "")
     vim.wo[S.main.win].winhighlight = "WinBar:" .. focus .. ",WinBarNC:LazyDataMuted"
   end
   if S.result.win and vim.api.nvim_win_is_valid(S.result.win) then
     local item=workspace();local suffix=item and item.kind=="query"and #(item.results or {})>1 and string.format(" · %d/%d",item.result_index or 1,#item.results)or""
-    vim.wo[S.result.win].winbar = " Results" .. suffix .. " "
+    vim.wo[S.result.win].winbar = " Results" .. suffix .. (loading and " · " .. loading or "") .. " "
     vim.wo[S.result.win].winhighlight = "WinBar:" .. (S.active_panel == "result" and "LazyDataAccent" or "LazyDataMuted") .. ",WinBarNC:LazyDataMuted"
   end
 end
@@ -430,7 +465,7 @@ end
 
 local function render_query(item)
   if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then vim.api.nvim_win_set_buf(S.main.win, item.buf) end
-  if item.result_buf then render_result_set(item.result_buf, item.results and item.results[item.result_index or 1] or { message = "Press Ctrl-R to execute" }) end
+  if item.result_buf then render_result_set(item.result_buf, item.query_loading and { message = "Executing SQL query…" } or item.results and item.results[item.result_index or 1] or { message = "Press Ctrl-R to execute" }) end
   decorate()
 end
 
@@ -574,12 +609,20 @@ local function execute_query()
     if answer ~= 1 then return end
   end
   local params = { profile_id=item.profile.id, database=item.database, sql=sql }
-  request("query", params, function(results, err)
+  item.query_loading = true
+  render_query(item)
+  local request_id
+  request_id = request("query", params, function(results, err)
+    if item.query_request ~= request_id then return end
+    item.query_request = nil
+    item.query_loading = false
     if err then
       item.results = { { message = backend_error(err) } }; render_query(item); notify(backend_error(err), vim.log.levels.ERROR); return
     end
     item.results = results or {};item.result_index=1; vim.bo[item.buf].modified = false; render_query(item)
   end, true)
+  item.query_request = request_id
+  if not request_id then item.query_loading = false;render_query(item) end
 end
 
 local function open_query()

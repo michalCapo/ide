@@ -166,8 +166,10 @@ assert(state.picker.editing, "distinct-value picker did not start in filter mode
 state.picker.set_filter("core")
 assert(vim.wait(500, function() return state.picker and state.picker.filter == "core" and #state.picker.filtered == 1 end, 10), "distinct-value picker did not narrow results")
 vim.api.nvim_feedkeys("\r", "x", false)
+assert(state.workspaces[1].loading_rows and vim.wo[state.main.win].statusline:find("executing query", 1, true), "filter query did not show the table loader")
 assert(vim.wait(3000, function() return state.picker == nil and #state.workspaces[1].predicates == 1 and #state.workspaces[1].data.rows == 2 end, 20), "distinct-value filter was not applied")
 vim.api.nvim_feedkeys("F", "x", false)
+assert(state.workspaces[1].loading_rows and vim.wo[state.main.win].statusline:find("executing query", 1, true), "clearing filters did not show the table loader")
 assert(vim.wait(3000, function() return #state.workspaces[1].predicates == 0 and #state.workspaces[1].data.rows == 3 end, 20), "distinct-value filter was not cleared")
 
 local sort_cursor = vim.api.nvim_win_get_cursor(state.main.win)
@@ -175,10 +177,12 @@ local note_cursor_col = vim.fn.virtcol2col(state.main.win, sort_cursor[1], state
 vim.api.nvim_win_set_cursor(state.main.win, { sort_cursor[1], note_cursor_col })
 assert(state.workspaces[1].active_col == 2, "cursor-only sort setup unexpectedly changed the active column")
 vim.api.nvim_feedkeys("K", "x", false)
+assert(state.workspaces[1].loading_rows and vim.wo[state.main.win].statusline:find("executing query", 1, true), "sort query did not show the table loader")
 assert(vim.wait(3000, function()
   local item = state.workspaces[1]
-  return item.active_col == 3 and item.sort_column == "note" and item.sort_direction == "asc" and item.data.rows[1][3]:find("one complete", 1, true)
+  return not item.loading_rows and item.active_col == 3 and item.sort_column == "note" and item.sort_direction == "asc" and item.data.rows[1][3]:find("one complete", 1, true)
 end, 20), "Shift-K did not sort the cursor column ascending")
+assert(not state.workspaces[1].loading_rows and not vim.wo[state.main.win].statusline:find("executing query", 1, true), "sort loader remained after rows loaded")
 vim.api.nvim_feedkeys("J", "x", false)
 assert(vim.wait(3000, function()
   local item = state.workspaces[1]
@@ -257,7 +261,12 @@ vim.bo[query.buf].modifiable = true
 vim.api.nvim_buf_set_lines(query.buf, 0, -1, false, { "SELECT team, COUNT(*) AS count FROM people GROUP BY team ORDER BY count DESC" })
 vim.cmd.stopinsert()
 vim.api.nvim_feedkeys(string.char(18), "x", false)
+assert(query.query_loading, "SQL execution did not expose its loading state")
+assert(vim.wo[state.main.win].winbar:find("Executing SQL query", 1, true), "query winbar did not show the running SQL query")
+assert(vim.tbl_contains(vim.api.nvim_buf_get_lines(query.result_buf, 0, -1, false), "  Executing SQL query…"), "query results did not show a loader message")
 assert(vim.wait(3000, function() return query.results and query.results[1] and #query.results[1].rows == 2 end, 20), "query results did not load")
+assert(not query.query_loading, "SQL loading state remained after results loaded")
+assert(not vim.wo[state.main.win].winbar:find("Executing SQL query", 1, true), "query loader remained visible after results loaded")
 
 vim.api.nvim_feedkeys("[b[b", "x", false)
 assert(state.workspace_index == 1 and state.workspaces[1].table == "people", "could not return to the people table")
