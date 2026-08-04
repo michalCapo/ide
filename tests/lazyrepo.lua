@@ -51,4 +51,18 @@ vim.fn.delete(test_root, "rf")
 local lazyrepo = require("views.lazyrepo")
 assert(vim.deep_equal(lazyrepo._state.order, { "files", "locals", "remotes", "stashes", "commits" }))
 
+local accepted = false
+lazyrepo._confirm("Ignore and untrack a/very/long/path/to/a/generated/file.db?", function() accepted = true end)
+local dialog = lazyrepo._state.confirm_dialog
+assert(dialog and vim.api.nvim_win_is_valid(dialog.win))
+local config = vim.api.nvim_win_get_config(dialog.win)
+assert(config.relative == "editor" and config.title[1][1] == " Confirm ")
+assert(config.footer[1][1]:find("y yes", 1, true) and config.footer[1][1]:find("n no", 1, true))
+vim.cmd("normal n")
+assert(lazyrepo._state.confirm_dialog == nil and not accepted)
+
+lazyrepo._confirm("Proceed?", function() accepted = true end)
+vim.cmd("normal y")
+assert(lazyrepo._state.confirm_dialog == nil and accepted)
+
 print("lazyrepo parser tests: ok")

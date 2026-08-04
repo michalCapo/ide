@@ -6,6 +6,7 @@ local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "re
   dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
   watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false,
   fetch_timer = nil, fetch_request = nil,
+  confirm_dialog = nil,
   commit_prompt_win = nil, commit_prompt_buf = nil, commit_history = nil, commit_history_index = nil,
   commit_prompt_draft = nil }
 
@@ -288,8 +289,110 @@ local function run(args, label, async, opts)
   end
 end
 
+local close_confirm
+
+local function confirm_lines(prompt, width)
+  local available = math.max(1, width - 4)
+  local remaining = prompt
+  local lines = { "" }
+  while remaining ~= "" do
+    local count = vim.fn.strchars(remaining)
+    local take = count
+    while take > 1 and vim.fn.strdisplaywidth(vim.fn.strcharpart(remaining, 0, take)) > available do
+      take = take - 1
+    end
+    local chunk = vim.fn.strcharpart(remaining, 0, take)
+    if take < count then
+      local break_at = chunk:match("^.*()%s+")
+      if break_at and break_at > math.floor(#chunk / 2) then
+        chunk = chunk:sub(1, break_at - 1)
+        take = vim.fn.strchars(chunk)
+      end
+    end
+    lines[#lines + 1] = "  " .. chunk
+    remaining = vim.fn.strcharpart(remaining, take):gsub("^%s+", "")
+  end
+  lines[#lines + 1] = ""
+  return lines
+end
+
+local function confirm_config(prompt)
+  local width = math.min(math.max(36, vim.fn.strdisplaywidth(prompt) + 4), 72, math.max(1, vim.o.columns - 4))
+  local lines = confirm_lines(prompt, width)
+  local height = #lines
+  return {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title = " Confirm ",
+    title_pos = "center",
+    footer = " y yes · n no · Esc cancel ",
+    footer_pos = "center",
+    width = width,
+    height = height,
+    row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - height - 2) / 2)),
+    col = math.max(0, math.floor((vim.o.columns - width - 2) / 2)),
+    zindex = 90,
+  }, lines
+end
+
+local function render_confirm(dialog)
+  if S.confirm_dialog ~= dialog or not vim.api.nvim_buf_is_valid(dialog.buf) then return end
+  local config, lines = confirm_config(dialog.prompt)
+  if vim.api.nvim_win_is_valid(dialog.win) then vim.api.nvim_win_set_config(dialog.win, config) end
+  vim.bo[dialog.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(dialog.buf, 0, -1, false, lines)
+  vim.bo[dialog.buf].modifiable = false
+end
+
+close_confirm = function(dialog, accepted)
+  if not dialog or S.confirm_dialog ~= dialog then return end
+  S.confirm_dialog = nil
+  if dialog.resize_autocmd then pcall(vim.api.nvim_del_autocmd, dialog.resize_autocmd) end
+  if dialog.win and vim.api.nvim_win_is_valid(dialog.win) then pcall(vim.api.nvim_win_close, dialog.win, true) end
+  if dialog.buf and vim.api.nvim_buf_is_valid(dialog.buf) then
+    pcall(vim.api.nvim_buf_delete, dialog.buf, { force = true })
+  end
+  if dialog.return_win and vim.api.nvim_win_is_valid(dialog.return_win) then
+    pcall(vim.api.nvim_set_current_win, dialog.return_win)
+  end
+  if accepted then dialog.callback() end
+end
+
 local function confirm(prompt, callback)
-  vim.ui.select({ "No", "Yes" }, { prompt = prompt }, function(choice) if choice == "Yes" then callback() end end)
+  if S.confirm_dialog then close_confirm(S.confirm_dialog, false) end
+  local config, lines = confirm_config(prompt)
+  local dialog = {
+    prompt = prompt,
+    callback = callback,
+    return_win = vim.api.nvim_get_current_win(),
+    buf = vim.api.nvim_create_buf(false, true),
+  }
+  vim.bo[dialog.buf].bufhidden = "wipe"
+  vim.bo[dialog.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(dialog.buf, 0, -1, false, lines)
+  vim.bo[dialog.buf].modifiable = false
+  dialog.win = vim.api.nvim_open_win(dialog.buf, true, config)
+  S.confirm_dialog = dialog
+  vim.wo[dialog.win].cursorline = false
+  vim.wo[dialog.win].number = false
+  vim.wo[dialog.win].relativenumber = false
+  vim.wo[dialog.win].signcolumn = "no"
+  vim.wo[dialog.win].wrap = false
+  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  local opts = { buffer = dialog.buf, silent = true, nowait = true }
+  vim.keymap.set("n", "y", function() close_confirm(dialog, true) end, opts)
+  vim.keymap.set("n", "Y", function() close_confirm(dialog, true) end, opts)
+  vim.keymap.set("n", "n", function() close_confirm(dialog, false) end, opts)
+  vim.keymap.set("n", "N", function() close_confirm(dialog, false) end, opts)
+  vim.keymap.set("n", "<CR>", function() close_confirm(dialog, false) end, opts)
+  vim.keymap.set("n", "<Esc>", function() close_confirm(dialog, false) end, opts)
+  vim.keymap.set("n", "q", function() close_confirm(dialog, false) end, opts)
+  dialog.resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
+    callback = function()
+      if S.confirm_dialog == dialog then vim.schedule(function() render_confirm(dialog) end) end
+    end,
+  })
 end
 
 local function stage_selection()
@@ -833,4 +936,5 @@ function M.launch()
 end
 
 M._state = S
+M._confirm = confirm
 return M
