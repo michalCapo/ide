@@ -59,7 +59,7 @@ for _,heading in ipairs({"Navigation","Table data","Editing","Queries","Workspac
   assert(vim.tbl_contains(help_lines,"  "..heading),"help dialog is missing the "..heading.." group")
 end
 assert(vim.tbl_contains(help_lines, "    D            switch database"), "help dialog is missing the database keybinding row")
-assert(vim.tbl_contains(help_lines, "    yy/y         copy current/marked rows"), "help dialog is missing the copy keybinding row")
+assert(vim.tbl_contains(help_lines, "    yy/y         copy full current/marked rows"), "help dialog is missing the copy keybinding row")
 assert(vim.tbl_contains(help_lines, "    Space        mark/unmark row"), "help dialog is missing the row-mark keybinding")
 assert(vim.tbl_contains(help_lines, "    e            edit current/marked row cells"), "help dialog is missing the row-edit keybinding")
 assert(vim.tbl_contains(help_lines, "    Ctrl-S       stage edit / execute table changes"), "help dialog is missing the contextual row-save keybinding")
@@ -133,6 +133,8 @@ end, 20), "table rows did not load")
 assert(#state.workspaces[1].columns == 5)
 assert(state.workspaces[1].columns[1].name == "id", "id is not the first table column")
 assert(state.workspaces[1].data.columns[1] == "id", "id is not the first row-data column")
+assert(state.workspaces[1].sort_column == "id" and state.workspaces[1].sort_direction == "desc", "table did not default to descending id order")
+assert(state.workspaces[1].data.rows[1][1] == 3, "highest id was not loaded first")
 assert(#vim.api.nvim_tabpage_list_wins(0) == 1 and state.sidebar.win == nil, "table sidebar did not hide after focusing the table")
 state.workspaces[1].raw_where = "team = 'core'"
 vim.api.nvim_feedkeys("/\r", "x", false)
@@ -211,9 +213,9 @@ assert(vim.wait(3000, function()
 end, 20), "could not restore primary-key order after sorting")
 vim.api.nvim_feedkeys("ll", "x", false)
 assert(state.workspaces[1].active_col == 3, "could not return to the note column after sorting")
-local current_row_line=vim.api.nvim_buf_get_lines(state.workspaces[1].buf,2,3,false)[1]
+local current_row_line="1\tcore\tone complete value that is longer than a rendered table cell\tbasketball\tsms"
 vim.api.nvim_feedkeys("yy", "x", false)
-assert(vim.fn.getreg("+")==current_row_line,"yy did not copy the complete current table line")
+assert(vim.fn.getreg("+")==current_row_line,"yy did not copy the current row's complete values")
 vim.api.nvim_feedkeys("v", "x", false)
 assert(state.viewer and state.viewer.win and vim.api.nvim_win_is_valid(state.viewer.win), "full-value viewer did not open")
 assert(table.concat(vim.api.nvim_buf_get_lines(state.viewer.buf, 0, -1, false), "\n") == "one complete value that is longer than a rendered table cell", "full-value viewer truncated the cell")
@@ -306,8 +308,8 @@ vim.api.nvim_win_set_cursor(state.main.win, { 3, 0 })
 vim.api.nvim_feedkeys("0l", "x", false)
 vim.api.nvim_feedkeys(" ", "x", false)
 vim.api.nvim_feedkeys("j ", "x", false)
-local marked_row_lines=vim.api.nvim_buf_get_lines(state.workspaces[1].buf,2,4,false)
-local marked_cursor_line=vim.api.nvim_get_current_line()
+local marked_row_lines={current_row_line,"2\tcore\ttwo\tfootball\tsms"}
+local marked_cursor_line=marked_row_lines[2]
 vim.api.nvim_feedkeys("yy", "x", false)
 assert(vim.fn.getreg("+")==marked_cursor_line,"yy copied marked rows instead of only the current line")
 vim.api.nvim_feedkeys("y", "x", false)
@@ -374,7 +376,7 @@ assert(paged_item.loading_rows, "]] did not expose the table loading state")
 assert(vim.wo[state.main.win].statusline:find("executing query", 1, true), "table statusline did not show the running query")
 assert(vim.wait(3000, function()
   local item = state.workspaces[4]
-  return item.page == 1 and item.data and #item.data.rows == 5 and item.data.rows[1][1] == 31 and not item.data.has_more
+  return item.page == 1 and item.data and #item.data.rows == 5 and item.data.rows[1][1] == 5 and not item.data.has_more
 end, 20), "]] did not load the next 30-row page")
 assert(not paged_item.loading_rows, "table loading state remained after rows loaded")
 assert(not vim.wo[state.main.win].statusline:find("executing query", 1, true), "table loader remained visible after rows loaded")

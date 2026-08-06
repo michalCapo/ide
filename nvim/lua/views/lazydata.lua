@@ -558,6 +558,11 @@ local function load_columns(item, after)
   request("columns", base_params(item), function(result, err)
     if err then notify(backend_error(err), vim.log.levels.ERROR); return end
     item.columns = result or {}
+    if not item.sort_column and not item.sort_direction then
+      for _,column in ipairs(item.columns)do
+        if column.name:lower()=="id"then item.sort_column,item.sort_direction=column.name,"desc";break end
+      end
+    end
     if after then after() elseif workspace() == item then render_table(item) end
   end, true)
 end
@@ -987,17 +992,35 @@ local function copy_lines(lines,label)
   vim.notify(label or(#lines==1 and"Copied line to clipboard"or string.format("Copied %d rows to clipboard",#lines)),vim.log.levels.INFO)
 end
 
+local function clipboard_value(value)
+  if value==vim.NIL or value==nil then return"NULL"end
+  local text=type(value)=="table"and vim.json.encode(value)or tostring(value)
+  if text:find('[\t\r\n"]')then text='"'..text:gsub('"','""')..'"'end
+  return text
+end
+
+local function clipboard_row(row)
+  local values={};for index,value in ipairs(row or{})do values[index]=clipboard_value(value)end
+  return table.concat(values,"\t")
+end
+
 local function copy_focused_line()
   local buf=vim.api.nvim_get_current_buf();local row=vim.api.nvim_win_get_cursor(0)[1]
+  local item=workspace()
+  if item and item.kind=="table"and item.mode=="rows"and item.data and buf==item.buf then
+    local result=edited_result(item);local data_row=result and result.rows and result.rows[row-2]
+    if data_row then copy_lines({clipboard_row(data_row)},"Copied full row to clipboard");return end
+  end
   copy_lines(vim.api.nvim_buf_get_lines(buf,row-1,row,false))
 end
 
 local function copy_marked_rows()
   local item=workspace();local buf=vim.api.nvim_get_current_buf();local lines={}
   if not item or item.kind~="table"or item.mode~="rows"or not item.data or buf~=item.buf or vim.tbl_count(item.marked_rows or{})==0 then return false end
+  local result=edited_result(item)
   for row_index,row in ipairs(item.data.rows or{})do
     local identity=row_identity(item,row)
-    if identity and item.marked_rows[identity]then lines[#lines+1]=(vim.api.nvim_buf_get_lines(buf,row_index+1,row_index+2,false)[1]or"")end
+    if identity and item.marked_rows[identity]then lines[#lines+1]=clipboard_row(result.rows[row_index])end
   end
   copy_lines(lines,string.format("Copied %d marked %s to clipboard",#lines,#lines==1 and"row"or"rows"))
   return true
@@ -1359,7 +1382,7 @@ local function show_help()
     {"Tab/S-Tab","focus panel"},{"Enter","open"},{"b","previous word / back in lists"},{"Backspace","connections"},
   })
   group("Table data",{
-    {"1/2","rows/columns"},{"c","jump to column"},{"v","view full value"},{"yy/y","copy current/marked rows"},{"/","search or WHERE"},
+    {"1/2","rows/columns"},{"c","jump to column"},{"v","view full value"},{"yy/y","copy full current/marked rows"},{"/","search or WHERE"},
     {"u","unique values"},{"f/F","remove one/all filters"},{"Shift-K/J","sort ascending/descending"},{"[[/]]","previous/next 30 rows"},
   })
   group("Editing",{
