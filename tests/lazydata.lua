@@ -59,6 +59,7 @@ for _,heading in ipairs({"Navigation","Table data","Editing","Queries","Workspac
   assert(vim.tbl_contains(help_lines,"  "..heading),"help dialog is missing the "..heading.." group")
 end
 assert(vim.tbl_contains(help_lines, "    D            switch database"), "help dialog is missing the database keybinding row")
+assert(vim.tbl_contains(help_lines, "    yy/y         copy current/marked rows"), "help dialog is missing the copy keybinding row")
 assert(vim.tbl_contains(help_lines, "    Space        mark/unmark row"), "help dialog is missing the row-mark keybinding")
 assert(vim.tbl_contains(help_lines, "    e            edit current/marked row cells"), "help dialog is missing the row-edit keybinding")
 assert(vim.tbl_contains(help_lines, "    Ctrl-S       stage edit / execute table changes"), "help dialog is missing the contextual row-save keybinding")
@@ -210,15 +211,22 @@ assert(vim.wait(3000, function()
 end, 20), "could not restore primary-key order after sorting")
 vim.api.nvim_feedkeys("ll", "x", false)
 assert(state.workspaces[1].active_col == 3, "could not return to the note column after sorting")
+local current_row_line=vim.api.nvim_buf_get_lines(state.workspaces[1].buf,2,3,false)[1]
+vim.api.nvim_feedkeys("yy", "x", false)
+assert(vim.fn.getreg("+")==current_row_line,"yy did not copy the complete current table line")
 vim.api.nvim_feedkeys("v", "x", false)
 assert(state.viewer and state.viewer.win and vim.api.nvim_win_is_valid(state.viewer.win), "full-value viewer did not open")
 assert(table.concat(vim.api.nvim_buf_get_lines(state.viewer.buf, 0, -1, false), "\n") == "one complete value that is longer than a rendered table cell", "full-value viewer truncated the cell")
 local has_format_mapping = false
-for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.viewer.buf, "n")) do if mapping.lhs == "=" then has_format_mapping = true break end end
+local has_copy_mapping = false
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.viewer.buf, "n")) do if mapping.lhs == "=" then has_format_mapping = true elseif mapping.lhs == "yy" then has_copy_mapping = true end end
 assert(has_format_mapping, "full-value viewer has no format mapping")
+assert(has_copy_mapping, "full-value viewer has no yy copy mapping")
 local viewer_config = vim.api.nvim_win_get_config(state.viewer.win)
 assert(viewer_config.width >= vim.o.columns - 8 and viewer_config.height >= vim.o.lines - vim.o.cmdheight - 7, "full-value viewer is not near fullscreen")
 assert(vim.bo[state.viewer.buf].readonly and not vim.bo[state.viewer.buf].modifiable, "full-value viewer is not read-only")
+vim.api.nvim_feedkeys("yy", "x", false)
+assert(vim.fn.getreg("+")=="one complete value that is longer than a rendered table cell","yy did not copy the viewed value line")
 vim.api.nvim_feedkeys("q", "x", false)
 assert(state.viewer == nil and vim.api.nvim_get_current_win() == state.main.win, "full-value viewer did not close back to the table")
 
@@ -283,6 +291,8 @@ assert(state.workspace_index == 1 and state.workspaces[1].table == "people", "co
 local table_mappings = {}
 for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.workspaces[1].buf, "n")) do table_mappings[mapping.lhs] = true end
 assert(table_mappings[" "], "Space row-mark mapping is missing")
+assert(table_mappings.yy, "yy row-copy mapping is missing")
+assert(table_mappings.y, "y marked-row copy mapping is missing")
 assert(table_mappings.e, "e row-edit mapping is missing")
 assert(table_mappings["<C-S>"], "Ctrl-S row-save mapping is missing")
 assert(table_mappings.U, "U row-discard mapping is missing")
@@ -296,6 +306,12 @@ vim.api.nvim_win_set_cursor(state.main.win, { 3, 0 })
 vim.api.nvim_feedkeys("0l", "x", false)
 vim.api.nvim_feedkeys(" ", "x", false)
 vim.api.nvim_feedkeys("j ", "x", false)
+local marked_row_lines=vim.api.nvim_buf_get_lines(state.workspaces[1].buf,2,4,false)
+local marked_cursor_line=vim.api.nvim_get_current_line()
+vim.api.nvim_feedkeys("yy", "x", false)
+assert(vim.fn.getreg("+")==marked_cursor_line,"yy copied marked rows instead of only the current line")
+vim.api.nvim_feedkeys("y", "x", false)
+assert(vim.wait(1000,function()return vim.fn.getreg("+")==table.concat(marked_row_lines,"\n")end,10),"y did not copy all marked rows in display order")
 vim.api.nvim_feedkeys("e", "x", false)
 assert(state.cell_editor and #state.cell_editor.targets == 2 and state.cell_editor.column.name == "team", "multi-row cell editor did not open for the marked rows")
 vim.cmd.stopinsert()

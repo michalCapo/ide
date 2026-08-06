@@ -981,6 +981,28 @@ local function current_table_row()
   return item,identity,key,row,row_index
 end
 
+local function copy_lines(lines,label)
+  if #lines==0 then return end
+  vim.fn.setreg("+",table.concat(lines,"\n"))
+  vim.notify(label or(#lines==1 and"Copied line to clipboard"or string.format("Copied %d rows to clipboard",#lines)),vim.log.levels.INFO)
+end
+
+local function copy_focused_line()
+  local buf=vim.api.nvim_get_current_buf();local row=vim.api.nvim_win_get_cursor(0)[1]
+  copy_lines(vim.api.nvim_buf_get_lines(buf,row-1,row,false))
+end
+
+local function copy_marked_rows()
+  local item=workspace();local buf=vim.api.nvim_get_current_buf();local lines={}
+  if not item or item.kind~="table"or item.mode~="rows"or not item.data or buf~=item.buf or vim.tbl_count(item.marked_rows or{})==0 then return false end
+  for row_index,row in ipairs(item.data.rows or{})do
+    local identity=row_identity(item,row)
+    if identity and item.marked_rows[identity]then lines[#lines+1]=(vim.api.nvim_buf_get_lines(buf,row_index+1,row_index+2,false)[1]or"")end
+  end
+  copy_lines(lines,string.format("Copied %d marked %s to clipboard",#lines,#lines==1 and"row"or"rows"))
+  return true
+end
+
 local function toggle_row_mark()
   local item,identity,key=current_table_row()
   if not item then return end
@@ -1199,7 +1221,7 @@ end
 
 local function viewer_config(column)
   local width=math.max(1,vim.o.columns-6);local height=math.max(3,vim.o.lines-vim.o.cmdheight-5)
-  return {relative="editor",style="minimal",border="rounded",title=" "..column.name.." ",title_pos="center",footer=" q/Esc close · = format · / search · visual select/yank ",footer_pos="center",width=width,height=height,row=1,col=2,zindex=70}
+  return {relative="editor",style="minimal",border="rounded",title=" "..column.name.." ",title_pos="center",footer=" q/Esc close · = format · yy copy line · visual y copy selection ",footer_pos="center",width=width,height=height,row=1,col=2,zindex=70}
 end
 
 local value_type_filetypes={json="json",jsonb="json",xml="xml",html="html",yaml="yaml",yml="yaml",toml="toml",sql="sql",markdown="markdown",md="markdown",javascript="javascript",typescript="typescript",lua="lua",css="css",scss="scss",bash="bash",shell="sh",csv="csv"}
@@ -1301,7 +1323,7 @@ open_value_viewer = function()
     vim.bo[viewer.buf].readonly=false;vim.bo[viewer.buf].modifiable=true;set_lines(viewer.buf,vim.split(formatted,"\n",{plain=true}));vim.bo[viewer.buf].modifiable=false;vim.bo[viewer.buf].readonly=true
     vim.wo[viewer.win].number=true;pcall(vim.api.nvim_win_set_cursor,viewer.win,{1,0})
   end
-  local opts={buffer=viewer.buf,silent=true,nowait=true};vim.keymap.set("n","q",close_viewer,opts);vim.keymap.set("n","<Esc>",close_viewer,opts);vim.keymap.set("n","=",format_viewer,opts)
+  local opts={buffer=viewer.buf,silent=true,nowait=true};vim.keymap.set("n","q",close_viewer,opts);vim.keymap.set("n","<Esc>",close_viewer,opts);vim.keymap.set("n","=",format_viewer,opts);vim.keymap.set("n","yy",copy_focused_line,opts);vim.keymap.set("x","y",'"+y',opts)
   viewer.resize_autocmd=vim.api.nvim_create_autocmd("VimResized",{callback=function()if S.viewer==viewer and viewer.win and vim.api.nvim_win_is_valid(viewer.win)then vim.api.nvim_win_set_config(viewer.win,viewer_config(column))end end})
 end
 
@@ -1337,7 +1359,7 @@ local function show_help()
     {"Tab/S-Tab","focus panel"},{"Enter","open"},{"b","previous word / back in lists"},{"Backspace","connections"},
   })
   group("Table data",{
-    {"1/2","rows/columns"},{"c","jump to column"},{"v","view full value"},{"/","search or WHERE"},
+    {"1/2","rows/columns"},{"c","jump to column"},{"v","view full value"},{"yy/y","copy current/marked rows"},{"/","search or WHERE"},
     {"u","unique values"},{"f/F","remove one/all filters"},{"Shift-K/J","sort ascending/descending"},{"[[/]]","previous/next 30 rows"},
   })
   group("Editing",{
@@ -1390,6 +1412,8 @@ configure = function(buf)
   map("n","<CR>",function()if S.screen=="profiles"then connect_profile()elseif S.active_panel=="sidebar"then open_table()end end)
   map("n","/",search_focused);map("n","n",function()if S.screen=="profiles"then profile_form()end end);map("n","e",function()if S.screen=="profiles"then profile_form(selected_profile())else edit_table_cells()end end)
   map("n","<C-s>",save_table_edits);map("n","U",discard_table_edits)
+  vim.keymap.set("n","yy",copy_focused_line,{buffer=buf,silent=true,nowait=false})
+  vim.keymap.set("n","y",function()if not copy_marked_rows()then return'"+y'end;return""end,{buffer=buf,silent=true,nowait=false,expr=true})
   map("n","<Space>",toggle_row_mark);map("n","d",function()if S.screen=="profiles"then delete_profile()else delete_table_rows()end end)
   map("n","u",distinct_values);map("n","f",manage_filters);map("n","F",clear_filters);map("n","[[",function()change_page(-1)end);map("n","]]",function()change_page(1)end)
   map("n","[b",function()switch_workspace(-1)end);map("n","]b",function()switch_workspace(1)end);map("n","X",close_workspace)

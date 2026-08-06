@@ -90,7 +90,10 @@ stored in plaintext in that file.
 Use `j`/`k` and `gg`/`G` to move, `Tab` to change panels, `Enter` to open a
 table, `1`/`2` for rows/columns, `c` to search and jump to a column, `/` for
 search or a WHERE clause, `v` to view the complete selected cell in a large
-read-only buffer, and `u` for distinct values from the selected column. Use
+read-only buffer, and `u` for distinct values from the selected column. Press
+`yy` to copy the current row to the clipboard. Press `y` when rows are marked
+to copy all marked rows in display order. In the full-value viewer, `yy`
+copies the current line and visual-mode `y` copies the selection. Use
 `Shift-K`/`Shift-J` to sort the cursor column ascending/descending. Press
 `Space` to mark one or more rows. Press `e` to edit the current cell, or to set
 the selected column on every marked row. Cell edits are staged so you can
