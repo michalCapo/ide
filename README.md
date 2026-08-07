@@ -96,7 +96,10 @@ with `Space`, then press `y` to copy it; when several rows are marked, `y`
 copies all marked rows in display order without
 truncating their values. In the full-value viewer, `yy`
 copies the current line and visual-mode `y` copies the selection. Use
-`Shift-K`/`Shift-J` to sort the cursor column ascending/descending. Press
+`Shift-K`/`Shift-J` to sort the cursor column ascending/descending. Press `f`
+to manage active filters; from that dialog, `<C-e>` opens an editable `SELECT`
+query containing every active filter. From the table, `:query` does the same
+(`:Query` is the native command spelling). Press
 `Space` to mark one or more rows. Press `e` to edit the current cell, or to set
 the selected column on every marked row. Cell edits are staged so you can
 change several fields and rows before `<C-s>` executes them together in one

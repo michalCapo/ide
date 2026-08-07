@@ -45,6 +45,13 @@ assert(formatted_json:find('\n    "id": 6,', 1, true), "JSON formatter did not i
 local formatted_xml = assert(lazydata._format_value("xml", [[<?xml version="1.0"?><root><item id="1">value</item></root>]]))
 assert(formatted_xml:find('\n  <item id="1">', 1, true), "XML formatter did not indent a child element")
 assert(not lazydata._format_value("json", [[{"broken":}]]), "invalid JSON was formatted")
+assert(lazydata._filter_query({profile={driver="sqlite"},table="people",predicates={}})=="SELECT *\nFROM \"people\";","filter query without filters was not a complete SELECT")
+local quoted_filter_query=lazydata._filter_query({profile={driver="mssql"},schema="sales",table="order]s",predicates={{column="company_ico",value=31678378},{column="name",value="O'Brien"},{column="closed_at",is_null=true}}})
+assert(quoted_filter_query==[=[SELECT *
+FROM [sales].[order]]s]
+WHERE [company_ico] = 31678378
+  AND [name] = N'O''Brien'
+  AND [closed_at] IS NULL;]=],"filter query did not quote SQL Server identifiers and values safely: "..quoted_filter_query)
 lazydata.launch()
 local state = lazydata._state
 
@@ -87,6 +94,7 @@ for _,heading in ipairs({"Navigation","Table data","Editing","Queries","Workspac
 end
 assert(vim.tbl_contains(help_lines, "    D            switch database"), "help dialog is missing the database keybinding row")
 assert(vim.tbl_contains(help_lines, "    yy/y         copy current field / marked rows"), "help dialog is missing the copy keybinding row")
+assert(vim.tbl_contains(help_lines, "    :query       current table and filters to query"), "help dialog is missing the filtered-query command")
 assert(vim.tbl_contains(help_lines, "    Space        mark/unmark row"), "help dialog is missing the row-mark keybinding")
 assert(vim.tbl_contains(help_lines, "    e            edit current/marked row cells"), "help dialog is missing the row-edit keybinding")
 assert(vim.tbl_contains(help_lines, "    Ctrl-S       stage edit / execute table changes"), "help dialog is missing the contextual row-save keybinding")
@@ -208,6 +216,33 @@ assert(vim.wait(500, function() return state.picker and state.picker.filter == "
 vim.api.nvim_feedkeys("\r", "x", false)
 assert(state.workspaces[1].loading_rows and vim.wo[state.main.win].statusline:find("executing query", 1, true), "filter query did not show the table loader")
 assert(vim.wait(3000, function() return state.picker == nil and #state.workspaces[1].predicates == 1 and #state.workspaces[1].data.rows == 2 end, 20), "distinct-value filter was not applied")
+local filtered_table=state.workspaces[1]
+filtered_table.raw_where="authorization_method = 'sms'"
+vim.api.nvim_feedkeys("f", "x", false)
+assert(state.picker and state.picker.title=="Remove filter", "f did not open the filter manager")
+local filter_picker_lines=vim.api.nvim_buf_get_lines(state.picker.buf,0,-1,false)
+assert(filter_picker_lines[#filter_picker_lines]:find("Ctrl-E query",1,true), "filter manager did not advertise the query action")
+assert(filter_picker_lines[#filter_picker_lines]:find("Enter remove",1,true), "filter manager did not describe its remove action")
+vim.api.nvim_feedkeys(string.char(5), "x", false)
+assert(state.picker==nil and state.workspaces[state.workspace_index].kind=="query", "Ctrl-E did not replace the filter dialog with a query editor")
+local filter_query=table.concat(vim.api.nvim_buf_get_lines(state.workspaces[state.workspace_index].buf,0,-1,false),"\n")
+assert(filter_query==[[SELECT *
+FROM "people"
+WHERE (authorization_method = 'sms')
+  AND "team" = 'core';]], "generated query did not contain every active filter: "..filter_query)
+local query_cursor=vim.api.nvim_win_get_cursor(state.main.win)
+local generated_query_item=state.workspaces[state.workspace_index]
+local query_last_line=vim.api.nvim_buf_get_lines(generated_query_item.buf,query_cursor[1]-1,query_cursor[1],false)[1]or""
+assert(query_cursor[1]==4 and query_cursor[2]==#query_last_line-2, string.format("generated query cursor was not placed before the final semicolon (row=%d col=%d expected_col=%d line=%s)",query_cursor[1],query_cursor[2],#query_last_line-2,query_last_line))
+vim.cmd.stopinsert();vim.api.nvim_feedkeys("X", "x", false)
+assert(state.workspaces[state.workspace_index]==filtered_table, "closing the generated query did not return to its table")
+vim.api.nvim_feedkeys(":query\r", "x", false)
+assert(vim.wait(500,function()return state.workspaces[state.workspace_index].kind=="query"end,10), ":query did not open a generated query")
+local command_query=table.concat(vim.api.nvim_buf_get_lines(state.workspaces[state.workspace_index].buf,0,-1,false),"\n")
+assert(command_query==filter_query, ":query did not use the same current filters as Ctrl-E")
+vim.cmd.stopinsert();vim.api.nvim_feedkeys("X", "x", false)
+assert(state.workspaces[state.workspace_index]==filtered_table, "closing the :query result did not return to its table")
+filtered_table.raw_where=""
 vim.api.nvim_feedkeys("F", "x", false)
 assert(state.workspaces[1].loading_rows and vim.wo[state.main.win].statusline:find("executing query", 1, true), "clearing filters did not show the table loader")
 assert(vim.wait(3000, function() return #state.workspaces[1].predicates == 0 and #state.workspaces[1].data.rows == 3 end, 20), "distinct-value filter was not cleared")
@@ -314,6 +349,15 @@ assert(vim.tbl_contains(vim.api.nvim_buf_get_lines(query.result_buf, 0, -1, fals
 assert(vim.wait(3000, function() return query.results and query.results[1] and #query.results[1].rows == 2 end, 20), "query results did not load")
 assert(not query.query_loading, "SQL loading state remained after results loaded")
 assert(not vim.wo[state.main.win].winbar:find("Executing SQL query", 1, true), "query loader remained visible after results loaded")
+
+vim.bo[query.buf].modifiable=true
+vim.api.nvim_buf_set_lines(query.buf,0,-1,false,{"DELETE FROM teams WHERE id = 1"})
+lazydata._confirm_override=function()return 1 end
+vim.api.nvim_feedkeys(string.char(18),"x",false)
+lazydata._confirm_override=nil
+assert(vim.wait(3000,function()return query.results and query.results[1] and query.results[1].affected~=nil end,20),"DELETE query did not return a completion result: loading="..tostring(query.query_loading).." results="..vim.inspect(query.results))
+local delete_result_lines=vim.api.nvim_buf_get_lines(query.result_buf,0,-1,false)
+assert(vim.tbl_contains(delete_result_lines,"  Query completed · 1 row affected"),"DELETE result did not render its affected-row status")
 
 vim.api.nvim_feedkeys("[b[b", "x", false)
 assert(state.workspace_index == 1 and state.workspaces[1].table == "people", "could not return to the people table")

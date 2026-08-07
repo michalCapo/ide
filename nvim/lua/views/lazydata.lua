@@ -15,7 +15,7 @@ local ns = vim.api.nvim_create_namespace("lazydata")
 local form_ns = vim.api.nvim_create_namespace("lazydata_form")
 local picker_ns = vim.api.nvim_create_namespace("lazydata_picker")
 local prompt_ns = vim.api.nvim_create_namespace("lazydata_prompt")
-local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer, edit_table_cells, save_table_edits, discard_table_edits, value_filetype, workspace, connect_profile, decorate
+local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, open_query, jump_to_column, open_value_viewer, edit_table_cells, save_table_edits, discard_table_edits, value_filetype, workspace, connect_profile, decorate
 
 local function session_path()
   if vim.env.LAZYDATA_EMBEDDED ~= "1" then return nil end
@@ -479,13 +479,17 @@ end
 
 local function render_result_set(buf, result)
   result = result or {}
-  if not result.columns or #result.columns == 0 then
-    set_lines(buf, { "", "  " .. (result.message or "No results") })
+  local columns=type(result.columns)=="table"and result.columns or{}
+  local rows=type(result.rows)=="table"and result.rows or{}
+  if #columns == 0 then
+    local message=type(result.message)=="string"and result.message or"No results"
+    if type(result.affected)=="number"then message=string.format("Query completed · %d %s affected",result.affected,result.affected==1 and"row"or"rows")end
+    set_lines(buf, { "", "  " .. message })
     return {}, {}
   end
   local widths = {}
-  for i, name in ipairs(result.columns) do widths[i] = math.min(32, math.max(3, vim.fn.strdisplaywidth(name))) end
-  for _, row in ipairs(result.rows or {}) do
+  for i, name in ipairs(columns) do widths[i] = math.min(32, math.max(3, vim.fn.strdisplaywidth(name))) end
+  for _, row in ipairs(rows) do
     for i, value in ipairs(row) do widths[i] = math.min(32, math.max(widths[i], vim.fn.strdisplaywidth(value_text(value)))) end
   end
   local function line(row)
@@ -496,12 +500,12 @@ local function render_result_set(buf, result)
     end
     return " " .. table.concat(cells, " │ ") .. " "
   end
-  local lines = { line(result.columns) }
+  local lines = { line(columns) }
   local rule = {}
   for i, width in ipairs(widths) do rule[i] = string.rep("─", width) end
   lines[#lines + 1] = "─" .. table.concat(rule, "─┼─") .. "─"
-  for _, row in ipairs(result.rows or {}) do lines[#lines + 1] = line(row) end
-  if #(result.rows or {}) == 0 then lines[#lines + 1] = "  No rows." end
+  for _, row in ipairs(rows) do lines[#lines + 1] = line(row) end
+  if #rows == 0 then lines[#lines + 1] = "  No rows." end
   set_lines(buf, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   pcall(vim.api.nvim_buf_add_highlight, buf, ns, "LazyDataHeader", 0, 0, -1)
@@ -519,6 +523,41 @@ local function filter_summary(item)
     parts[#parts + 1] = p.column .. (p.is_null and " IS NULL" or " = " .. value_text(p.value))
   end
   return #parts > 0 and table.concat(parts, " AND ") or "none"
+end
+
+local function sql_identifier(driver,value)
+  value=tostring(value or"")
+  if driver=="mssql"then return"["..value:gsub("]","]]").."]"end
+  return'"'..value:gsub('"','""')..'"'
+end
+
+local function sql_literal(driver,value)
+  if value==vim.NIL or value==nil then return"NULL"end
+  if type(value)=="boolean"then return driver=="postgres"and(value and"TRUE"or"FALSE")or(value and"1"or"0")end
+  if type(value)=="number"then return tostring(value)end
+  local text=type(value)=="table"and vim.json.encode(value)or tostring(value)
+  return(driver=="mssql"and"N"or"").."'"..text:gsub("'","''").."'"
+end
+
+local function filter_query(item)
+  local driver=item.profile and item.profile.driver or"sqlite"
+  local target={}
+  if item.schema and item.schema~=""then target[#target+1]=sql_identifier(driver,item.schema)end
+  target[#target+1]=sql_identifier(driver,item.table)
+  local conditions={}
+  if item.raw_where and vim.trim(item.raw_where)~=""then conditions[#conditions+1]="("..vim.trim(item.raw_where)..")"end
+  for _,predicate in ipairs(item.predicates or{})do
+    local identifier=sql_identifier(driver,predicate.column)
+    if predicate.is_null or predicate.value==vim.NIL or predicate.value==nil then
+      conditions[#conditions+1]=identifier.." IS NULL"
+    else
+      conditions[#conditions+1]=identifier.." = "..sql_literal(driver,predicate.value)
+    end
+  end
+  local lines={"SELECT *","FROM "..table.concat(target,".")}
+  for index,condition in ipairs(conditions)do lines[#lines+1]=(index==1 and"WHERE "or"  AND ")..condition end
+  lines[#lines]=lines[#lines]..";"
+  return table.concat(lines,"\n")
 end
 
 local function cell_byte_col(win,row,visual_col)
@@ -801,11 +840,12 @@ local function execute_query()
   if not request_id then item.query_loading = false;render_query(item) end
 end
 
-local function open_query()
+open_query = function(initial_sql)
   if not S.profile then notify("Connect to a database first", vim.log.levels.WARN); return end
   local number = 1; for _, w in ipairs(S.workspaces) do if w.kind == "query" then number = number + 1 end end
   local item = { kind="query", title="query "..number, profile=S.profile, database=S.database, buf=make_buf("query/"..number, true), result_buf=make_buf("results/"..number, false) }
   vim.bo[item.buf].buftype = "acwrite"; vim.bo[item.buf].filetype = "sql"
+  if initial_sql and initial_sql~=""then vim.api.nvim_buf_set_lines(item.buf,0,-1,false,vim.split(initial_sql,"\n",{plain=true}));vim.bo[item.buf].modified=false end
   vim.api.nvim_create_autocmd("BufWriteCmd", { buffer=item.buf, callback=function() execute_query() end })
   local opts={buffer=item.buf,silent=true}
   vim.keymap.set({"n","v"},"<C-r>",execute_query,opts)
@@ -817,7 +857,17 @@ local function open_query()
   vim.keymap.set("n","<Tab>",function()focus(1)end,opts);vim.keymap.set("n","<S-Tab>",function()focus(-1)end,opts)
   configure(item.result_buf)
   S.workspaces[#S.workspaces+1]=item;S.workspace_index=#S.workspaces;S.active_panel="main";M.apply_layout(true)
-  if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then vim.api.nvim_set_current_win(S.main.win);vim.cmd.startinsert() end
+  if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
+    vim.api.nvim_set_current_win(S.main.win)
+    if initial_sql and initial_sql~=""then local last=vim.api.nvim_buf_line_count(item.buf);local line=vim.api.nvim_buf_get_lines(item.buf,last-1,last,false)[1]or"";vim.api.nvim_win_set_cursor(S.main.win,{last,math.max(0,#line-(line:sub(-1)==";"and 1 or 0))})end
+    vim.cmd.startinsert()
+  end
+end
+
+local function open_filter_query()
+  local item=workspace()
+  if S.screen~="workspace"or not item or item.kind~="table"then notify("Open a table before creating a filtered query",vim.log.levels.WARN);return end
+  open_query(filter_query(item))
 end
 
 switch_workspace = function(delta)
@@ -1103,7 +1153,9 @@ local function manage_filters()
   local item=workspace();if not item or item.kind~="table"then return end
   local choices={};if item.raw_where and item.raw_where~=""then choices[#choices+1]={kind="raw",label="WHERE: "..item.raw_where}end;for i,p in ipairs(item.predicates or {})do choices[#choices+1]={kind="predicate",index=i,label=p.column..(p.is_null and " IS NULL"or" = "..value_text(p.value))}end
   if #choices==0 then notify("No active filters");return end
-  open_picker("Remove filter",choices,function(v)return v.label end,function(choice)if choice.kind=="raw"then item.raw_where=""else table.remove(item.predicates,choice.index)end;item.page=0;load_rows(item)end)
+  open_picker("Remove filter",choices,function(v)return v.label end,function(choice)if choice.kind=="raw"then item.raw_where=""else table.remove(item.predicates,choice.index)end;item.page=0;load_rows(item)end,nil,{
+    select_label="remove",action_key="<C-e>",action_hint="Ctrl-E query",action=open_filter_query,
+  })
 end
 
 local function clear_filters()local item=workspace();if item and item.kind=="table"then item.raw_where="";item.predicates={};item.page=0;load_rows(item)end end
@@ -1317,7 +1369,7 @@ local function picker_items(picker)
 end
 
 local function picker_config(picker,height)
-  local width=math.max(24,math.min(64,vim.o.columns-4));height=math.max(5,math.min(height,vim.o.lines-vim.o.cmdheight-4))
+  local width=math.max(24,math.min(math.max(64,picker.hint_width or 0),math.min(76,vim.o.columns-4)));height=math.max(5,math.min(height,vim.o.lines-vim.o.cmdheight-4))
   return {relative="editor",style="minimal",border="rounded",title=" "..picker.title.." ",title_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=65}
 end
 
@@ -1328,7 +1380,8 @@ render_picker = function(picker)
   if picker.index<first then first=picker.index elseif picker.index>=first+max_rows then first=picker.index-max_rows+1 end;picker.first=first
   local lines={"",string.format("  %-12s %s","Filter",picker.filter or""),""};picker.filter_row=2;picker.item_row=4
   if #picker.filtered==0 then lines[#lines+1]="  No matches."else for i=first,math.min(#picker.filtered,first+max_rows-1)do lines[#lines+1]="  "..picker.filtered[i].label end end
-  lines[#lines+1]="";lines[#lines+1]=picker.editing and "  type to filter · Ctrl-N/P move · Enter select · Esc cancel"or"  / filter · j/k move · Enter select · Esc cancel"
+  local select_label=picker.select_label or"select";local action=picker.action_hint and(" · "..picker.action_hint)or""
+  lines[#lines+1]="";lines[#lines+1]=picker.editing and("  type filter · Ctrl-N/P move"..action.." · Enter "..select_label.." · Esc cancel")or("  / filter · j/k move"..action.." · Enter "..select_label.." · Esc cancel")
   if picker.win and vim.api.nvim_win_is_valid(picker.win)then vim.api.nvim_win_set_config(picker.win,picker_config(picker,#lines))end
   vim.bo[picker.buf].modifiable=true;vim.api.nvim_buf_set_lines(picker.buf,0,-1,false,lines);vim.bo[picker.buf].modifiable=picker.editing==true;vim.bo[picker.buf].modified=false
   vim.api.nvim_buf_clear_namespace(picker.buf,picker_ns,0,-1)
@@ -1350,9 +1403,10 @@ close_picker = function(picker,choice)
   if choice~=nil then picker.choose(choice)end
 end
 
-open_picker = function(title,items,format,choose,start_filter)
+open_picker = function(title,items,format,choose,start_filter,options)
   if S.picker then close_picker(S.picker)end
-  local picker={title=title,items=items or{},format=format or tostring,choose=choose,filter="",index=1,first=1,return_win=vim.api.nvim_get_current_win()};picker.buf=make_buf("picker",false);picker.win=vim.api.nvim_open_win(picker.buf,true,picker_config(picker,10));S.picker=picker
+  options=options or{}
+  local picker={title=title,items=items or{},format=format or tostring,choose=choose,filter="",index=1,first=1,return_win=vim.api.nvim_get_current_win(),select_label=options.select_label,action_hint=options.action_hint};picker.hint_width=picker.action_hint and vim.fn.strdisplaywidth("  type filter · Ctrl-N/P move · "..picker.action_hint.." · Enter "..(picker.select_label or"select").." · Esc cancel")+2 or 0;picker.buf=make_buf("picker",false);picker.win=vim.api.nvim_open_win(picker.buf,true,picker_config(picker,10));S.picker=picker
   vim.wo[picker.win].cursorline=false;vim.wo[picker.win].number=false;vim.wo[picker.win].relativenumber=false;vim.wo[picker.win].signcolumn="no";vim.wo[picker.win].wrap=false
   local opts={buffer=picker.buf,silent=true,nowait=true}
   local function move_picker(delta)picker.index=math.max(1,math.min(#picker.filtered,picker.index+delta));render_picker(picker)end
@@ -1364,6 +1418,7 @@ open_picker = function(title,items,format,choose,start_filter)
   vim.keymap.set("n","<C-n>",function()move_picker(1)end,opts);vim.keymap.set("n","<C-p>",function()move_picker(-1)end,opts);vim.keymap.set("n","<Down>",function()move_picker(1)end,opts);vim.keymap.set("n","<Up>",function()move_picker(-1)end,opts)
   vim.keymap.set("n","<Tab>",function()move_picker(1)end,opts);vim.keymap.set("n","<S-Tab>",function()move_picker(-1)end,opts);vim.keymap.set("n","/",begin_filter,opts)
   vim.keymap.set("n","<CR>",function()local selected=picker.filtered[picker.index];if selected then close_picker(picker,selected.item)end end,opts);vim.keymap.set("n","<Esc>",function()close_picker(picker)end,opts);vim.keymap.set("n","q",function()close_picker(picker)end,opts)
+  if options.action_key and options.action then vim.keymap.set("n",options.action_key,function()close_picker(picker);options.action()end,opts)end
   vim.keymap.set("n","<BS>",delete_filter,opts);vim.keymap.set("n","<C-h>",delete_filter,opts);vim.keymap.set("n","<C-u>",function()set_filter("")end,opts)
   picker.key_ns=vim.api.nvim_create_namespace("lazydata_picker_keys")
   vim.on_key(function(key,typed)if S.picker==picker and picker.editing and typed~=""and key==typed and not typed:find("%c")then picker.filter=(picker.filter or"")..typed;picker.index=1;picker.first=1;render_picker(picker);return""end end,picker.key_ns)
@@ -1530,7 +1585,7 @@ local function show_help()
     {"Ctrl-N","stage NULL in cell editor"},{"U","discard staged table changes"},{"d","delete marked/current row"},
   })
   group("Queries",{
-    {"Ctrl-E","new query"},{"Ctrl-R","run query"},{"Ctrl-C","cancel query"},{"[r/]r","previous/next result"},
+    {"Ctrl-E","new query"},{":query","current table and filters to query"},{"Ctrl-R","run query"},{"Ctrl-C","cancel query"},{"[r/]r","previous/next result"},
   })
   group("Workspace",{
     {"[b/]b","previous/next tab"},{"X","close tab"},{"D","switch database"},{"R","refresh current view"},{"q","quit"},
@@ -1605,6 +1660,8 @@ function M.launch()
   setup_highlights();vim.api.nvim_create_autocmd("ColorScheme",{callback=setup_highlights})
   vim.o.termguicolors=true;vim.o.laststatus=2;vim.o.showtabline=0
   S.group=vim.api.nvim_create_augroup("LazyData",{clear=true})
+  vim.api.nvim_create_user_command("Query",open_filter_query,{desc="Create a query from the current LazyData table and filters",force=true})
+  vim.cmd([[cnoreabbrev <expr> query getcmdtype() ==# ':' && getcmdline() ==# 'query' ? 'Query' : 'query']])
   S.main.buf=make_buf("connections",false);S.sidebar.buf=make_buf("tables",false);S.result.buf=make_buf("results",false)
   configure(S.main.buf);configure(S.sidebar.buf);configure(S.result.buf)
   vim.api.nvim_create_autocmd("VimResized",{group=S.group,callback=function()vim.schedule(function()M.apply_layout(true)end)end})
@@ -1619,6 +1676,7 @@ M._value_text=value_text
 M._value_filetype=value_filetype
 M._format_value=format_value
 M._open_picker=open_picker
+M._filter_query=filter_query
 M._confirm=confirm
 M._input=input
 return M
