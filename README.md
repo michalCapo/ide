@@ -91,8 +91,9 @@ Use `j`/`k` and `gg`/`G` to move, `Tab` to change panels, `Enter` to open a
 table, `1`/`2` for rows/columns, `c` to search and jump to a column, `/` for
 search or a WHERE clause, `v` to view the complete selected cell in a large
 read-only buffer, and `u` for distinct values from the selected column. Press
-`yy` to copy the current row's complete, tab-separated values to the clipboard.
-Press `y` when rows are marked to copy all marked rows in display order without
+`yy` to copy the current field's complete value to the clipboard. Mark a row
+with `Space`, then press `y` to copy it; when several rows are marked, `y`
+copies all marked rows in display order without
 truncating their values. In the full-value viewer, `yy`
 copies the current line and visual-mode `y` copies the selection. Use
 `Shift-K`/`Shift-J` to sort the cursor column ascending/descending. Press

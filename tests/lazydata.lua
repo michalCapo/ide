@@ -47,6 +47,33 @@ assert(formatted_xml:find('\n  <item id="1">', 1, true), "XML formatter did not 
 assert(not lazydata._format_value("json", [[{"broken":}]]), "invalid JSON was formatted")
 lazydata.launch()
 local state = lazydata._state
+
+local function assert_centered_prompt(expected_title)
+  local prompt = assert(state.prompt, "centered prompt state was not created")
+  assert(prompt.win and vim.api.nvim_win_is_valid(prompt.win), "centered prompt window was not opened")
+  local config = vim.api.nvim_win_get_config(prompt.win)
+  assert(config.relative == "editor", "prompt is not positioned relative to the editor")
+  assert(math.abs(config.row - math.floor((vim.o.lines - vim.o.cmdheight - config.height) / 2)) <= 1, "prompt is not vertically centered")
+  assert(math.abs(config.col - math.floor((vim.o.columns - config.width) / 2)) <= 1, "prompt is not horizontally centered")
+  assert(config.title[1][1] == expected_title, "prompt title did not describe its purpose")
+end
+
+vim.schedule(function()
+  assert_centered_prompt(" Confirm ")
+  local lines = vim.api.nvim_buf_get_lines(state.prompt.buf, 0, -1, false)
+  assert(vim.tbl_contains(lines, "  Discard modified query?"), "confirmation popup omitted its message")
+  vim.api.nvim_input("d")
+end)
+assert(lazydata._confirm("Discard modified query?", "&Discard\n&Keep", 2) == 1, "confirmation popup mnemonic did not select Discard")
+assert(state.prompt == nil, "confirmation popup did not clean up after selection")
+
+vim.schedule(function()
+  assert_centered_prompt(" Filter tables ")
+  vim.api.nvim_input("ple\r")
+end)
+assert(lazydata._input("Filter tables: ", "peo") == "people", "input popup did not return edited text")
+assert(state.prompt == nil, "input popup did not clean up after submission")
+
 local main_mappings = {}
 for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(state.main.buf, "n")) do main_mappings[mapping.lhs] = true end
 assert(main_mappings.b, "b back-navigation mapping is missing")
@@ -59,7 +86,7 @@ for _,heading in ipairs({"Navigation","Table data","Editing","Queries","Workspac
   assert(vim.tbl_contains(help_lines,"  "..heading),"help dialog is missing the "..heading.." group")
 end
 assert(vim.tbl_contains(help_lines, "    D            switch database"), "help dialog is missing the database keybinding row")
-assert(vim.tbl_contains(help_lines, "    yy/y         copy full current/marked rows"), "help dialog is missing the copy keybinding row")
+assert(vim.tbl_contains(help_lines, "    yy/y         copy current field / marked rows"), "help dialog is missing the copy keybinding row")
 assert(vim.tbl_contains(help_lines, "    Space        mark/unmark row"), "help dialog is missing the row-mark keybinding")
 assert(vim.tbl_contains(help_lines, "    e            edit current/marked row cells"), "help dialog is missing the row-edit keybinding")
 assert(vim.tbl_contains(help_lines, "    Ctrl-S       stage edit / execute table changes"), "help dialog is missing the contextual row-save keybinding")
@@ -215,7 +242,7 @@ vim.api.nvim_feedkeys("ll", "x", false)
 assert(state.workspaces[1].active_col == 3, "could not return to the note column after sorting")
 local current_row_line="1\tcore\tone complete value that is longer than a rendered table cell\tbasketball\tsms"
 vim.api.nvim_feedkeys("yy", "x", false)
-assert(vim.fn.getreg("+")==current_row_line,"yy did not copy the current row's complete values")
+assert(vim.fn.getreg("+")=="one complete value that is longer than a rendered table cell","yy did not copy the current field's complete value")
 vim.api.nvim_feedkeys("v", "x", false)
 assert(state.viewer and state.viewer.win and vim.api.nvim_win_is_valid(state.viewer.win), "full-value viewer did not open")
 assert(table.concat(vim.api.nvim_buf_get_lines(state.viewer.buf, 0, -1, false), "\n") == "one complete value that is longer than a rendered table cell", "full-value viewer truncated the cell")
@@ -309,9 +336,8 @@ vim.api.nvim_feedkeys("0l", "x", false)
 vim.api.nvim_feedkeys(" ", "x", false)
 vim.api.nvim_feedkeys("j ", "x", false)
 local marked_row_lines={current_row_line,"2\tcore\ttwo\tfootball\tsms"}
-local marked_cursor_line=marked_row_lines[2]
 vim.api.nvim_feedkeys("yy", "x", false)
-assert(vim.fn.getreg("+")==marked_cursor_line,"yy copied marked rows instead of only the current line")
+assert(vim.fn.getreg("+")=="core","yy copied a row instead of only the current field")
 vim.api.nvim_feedkeys("y", "x", false)
 assert(vim.wait(1000,function()return vim.fn.getreg("+")==table.concat(marked_row_lines,"\n")end,10),"y did not copy all marked rows in display order")
 vim.api.nvim_feedkeys("e", "x", false)
@@ -322,13 +348,12 @@ vim.api.nvim_feedkeys(string.char(19), "x", false)
 assert(state.cell_editor == nil and vim.tbl_count(state.workspaces[1].pending_updates) == 2, "cell editor did not stage both row updates")
 assert(vim.wo[state.main.win].statusline:find("changed: 2 fields / 2 rows", 1, true), "table statusline did not summarize staged updates")
 local update_prompt
-local original_update_confirm = vim.fn.confirm
-vim.fn.confirm = function(prompt, choices, default)
+lazydata._confirm_override = function(prompt, choices, default)
   update_prompt = { prompt = prompt, choices = choices, default = default }
   return 1
 end
 vim.api.nvim_feedkeys(string.char(19), "x", false)
-vim.fn.confirm = original_update_confirm
+lazydata._confirm_override = nil
 assert(update_prompt and update_prompt.prompt:find("Execute 2 staged field updates across 2 rows", 1, true), "multi-row update did not request execution confirmation")
 assert(update_prompt.choices == "&Execute\n&Cancel" and update_prompt.default == 2, "update confirmation did not default to Cancel")
 assert(vim.wait(3000, function()
@@ -346,14 +371,13 @@ for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(state.workspaces[1].buf, -1,
   if mark[4].line_hl_group == "LazyDataMarked" then marked_lines = marked_lines + 1 end
 end
 assert(marked_lines == 2, "marked rows were not highlighted")
-local original_confirm = vim.fn.confirm
 local delete_prompt
-vim.fn.confirm = function(prompt, choices, default)
+lazydata._confirm_override = function(prompt, choices, default)
   delete_prompt = { prompt = prompt, choices = choices, default = default }
   return 1
 end
 vim.api.nvim_feedkeys("d", "x", false)
-vim.fn.confirm = original_confirm
+lazydata._confirm_override = nil
 assert(delete_prompt and delete_prompt.prompt:find("Delete 2 marked rows", 1, true), "multi-row delete did not request confirmation")
 assert(delete_prompt.choices == "&Delete\n&Cancel" and delete_prompt.default == 2, "delete confirmation did not default to Cancel")
 assert(vim.wait(3000, function()

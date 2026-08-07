@@ -8,12 +8,13 @@ local S = {
   profile = nil, database = nil, tables = {}, table_index = 1, table_filter = "",
   workspaces = {}, workspace_index = 0, active_panel = "sidebar",
   sidebar = {}, main = {}, result = {}, group = nil, current_request = nil,
-  form = nil, picker = nil, viewer = nil, cell_editor = nil, message_dialog = nil,
+  form = nil, picker = nil, viewer = nil, cell_editor = nil, message_dialog = nil, prompt = nil,
 }
 
 local ns = vim.api.nvim_create_namespace("lazydata")
 local form_ns = vim.api.nvim_create_namespace("lazydata_form")
 local picker_ns = vim.api.nvim_create_namespace("lazydata_picker")
+local prompt_ns = vim.api.nvim_create_namespace("lazydata_prompt")
 local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, jump_to_column, open_value_viewer, edit_table_cells, save_table_edits, discard_table_edits, value_filetype, workspace, connect_profile, decorate
 
 local function session_path()
@@ -83,6 +84,144 @@ local function notify(message, level, preformatted, custom_title)
     if dialog.return_win and vim.api.nvim_win_is_valid(dialog.return_win)then pcall(vim.api.nvim_set_current_win,dialog.return_win)end
   end
   local opts={buffer=buf,silent=true,nowait=true};for _,key in ipairs({"<CR>","<Esc>","q","b"})do vim.keymap.set("n",key,close_dialog,opts)end
+end
+
+local function prompt_config(width, height, title)
+  width = math.max(28, math.min(width, math.max(28, vim.o.columns - 4)))
+  height = math.max(3, math.min(height, math.max(3, vim.o.lines - vim.o.cmdheight - 4)))
+  return {
+    relative = "editor", style = "minimal", border = "rounded", title = title,
+    title_pos = "center", width = width, height = height,
+    row = math.max(1, math.floor((vim.o.lines - vim.o.cmdheight - height) / 2)),
+    col = math.max(1, math.floor((vim.o.columns - width) / 2)), zindex = 90,
+  }
+end
+
+local function close_prompt(prompt)
+  if S.prompt == prompt then S.prompt = nil end
+  if prompt.win and vim.api.nvim_win_is_valid(prompt.win) then pcall(vim.api.nvim_win_close, prompt.win, true) end
+  if prompt.buf and vim.api.nvim_buf_is_valid(prompt.buf) then pcall(vim.api.nvim_buf_delete, prompt.buf, { force = true }) end
+  if prompt.return_win and vim.api.nvim_win_is_valid(prompt.return_win) then pcall(vim.api.nvim_set_current_win, prompt.return_win) end
+end
+
+local function create_prompt(title, width, height)
+  if S.prompt then close_prompt(S.prompt) end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = "nofile"; vim.bo[buf].bufhidden = "wipe"; vim.bo[buf].swapfile = false
+  local prompt = { buf = buf, return_win = vim.api.nvim_get_current_win() }
+  prompt.win = vim.api.nvim_open_win(buf, true, prompt_config(width, height, title))
+  S.prompt = prompt
+  vim.wo[prompt.win].wrap = false; vim.wo[prompt.win].cursorline = false
+  vim.wo[prompt.win].number = false; vim.wo[prompt.win].relativenumber = false; vim.wo[prompt.win].signcolumn = "no"
+  return prompt
+end
+
+local function split_choices(value)
+  local choices = {}
+  for _, raw in ipairs(vim.split(value or "", "\n", { plain = true })) do
+    local before, mnemonic, after = raw:match("^(.-)&(.)(.*)$")
+    local label = before and (before .. mnemonic .. after) or raw
+    choices[#choices + 1] = { label = label, key = (mnemonic or label:sub(1, 1)):lower() }
+  end
+  return choices
+end
+
+local function confirm(message, choices_text, default)
+  if M._confirm_override then return M._confirm_override(message, choices_text, default) end
+  local choices = split_choices(choices_text)
+  if #choices == 0 then return 0 end
+  local selected = math.max(1, math.min(#choices, default or 1))
+  local message_lines = vim.split(tostring(message or ""), "\n", { plain = true })
+  local width = 32
+  for _, line in ipairs(message_lines) do width = math.max(width, vim.fn.strdisplaywidth(line) + 4) end
+  for _, choice in ipairs(choices) do width = math.max(width, vim.fn.strdisplaywidth(choice.label) + 8) end
+  width = math.min(72, width)
+  local height = #message_lines + #choices + 3
+  local prompt = create_prompt(" Confirm ", width, height)
+  local choice_start = #message_lines + 2
+
+  local function render()
+    local lines = {}
+    for _, line in ipairs(message_lines) do lines[#lines + 1] = "  " .. line end
+    lines[#lines + 1] = ""
+    for _, choice in ipairs(choices) do lines[#lines + 1] = string.format("  [%s] %s", choice.key:upper(), choice.label) end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "  Enter select · Esc cancel"
+    vim.bo[prompt.buf].modifiable = true; vim.api.nvim_buf_set_lines(prompt.buf, 0, -1, false, lines); vim.bo[prompt.buf].modifiable = false
+    vim.api.nvim_buf_clear_namespace(prompt.buf, prompt_ns, 0, -1)
+    for index, choice in ipairs(choices) do
+      local row = choice_start + index - 2
+      vim.api.nvim_buf_set_extmark(prompt.buf, prompt_ns, row, 0, { line_hl_group = index == selected and "LazyDataSelected" or nil })
+      vim.api.nvim_buf_set_extmark(prompt.buf, prompt_ns, row, 3, { end_col = 4, hl_group = "LazyDataAccent" })
+    end
+    vim.api.nvim_win_set_cursor(prompt.win, { choice_start + selected - 1, 0 })
+    vim.cmd.redraw()
+  end
+
+  render()
+  while true do
+    local key = vim.fn.getcharstr()
+    if key == "\r" or key == "\n" then close_prompt(prompt); return selected end
+    if key == "\27" or key == "\3" then close_prompt(prompt); return 0 end
+    if key == vim.keycode("<Down>") or key == vim.keycode("<Tab>") or key == "j" then selected = selected % #choices + 1; render()
+    elseif key == vim.keycode("<Up>") or key == vim.keycode("<S-Tab>") or key == "k" then selected = (selected - 2) % #choices + 1; render()
+    else
+      local lowered = key:lower()
+      for index, choice in ipairs(choices) do
+        if lowered == choice.key then close_prompt(prompt); return index end
+      end
+    end
+  end
+end
+
+local function input(label, default, secret)
+  if M._input_override then return M._input_override(label, default, secret) end
+  local title = vim.trim(tostring(label or "")):gsub(":$", "")
+  if title == "" then title = "Input" end
+  local value = tostring(default or "")
+  local cursor = vim.fn.strchars(value)
+  local width = math.max(36, math.min(72, math.max(vim.fn.strdisplaywidth(title) + 6, vim.fn.strdisplaywidth(value) + 6)))
+  local prompt = create_prompt(" " .. title .. " ", width, 4)
+
+  local function render()
+    local shown = secret and string.rep("•", vim.fn.strchars(value)) or value
+    vim.bo[prompt.buf].modifiable = true
+    vim.api.nvim_buf_set_lines(prompt.buf, 0, -1, false, { "", "  " .. shown, "", "  Enter apply · Esc cancel" })
+    vim.bo[prompt.buf].modifiable = false
+    local byte_cursor = secret and cursor * #"•" or vim.str_byteindex(value, cursor)
+    vim.api.nvim_win_set_cursor(prompt.win, { 2, 2 + byte_cursor })
+    vim.cmd.redraw()
+  end
+
+  local function splice(first_char, last_char, replacement)
+    local first_byte = vim.str_byteindex(value, first_char)
+    local last_byte = vim.str_byteindex(value, last_char)
+    value = value:sub(1, first_byte) .. replacement .. value:sub(last_byte + 1)
+  end
+
+  render()
+  while true do
+    local key = vim.fn.getcharstr()
+    if key == "\r" or key == "\n" then close_prompt(prompt); return value end
+    if key == "\27" or key == "\3" then close_prompt(prompt); return nil end
+    if key == vim.keycode("<Left>") then cursor = math.max(0, cursor - 1)
+    elseif key == vim.keycode("<Right>") then cursor = math.min(vim.fn.strchars(value), cursor + 1)
+    elseif key == vim.keycode("<Home>") or key == "\1" then cursor = 0
+    elseif key == vim.keycode("<End>") or key == "\5" then cursor = vim.fn.strchars(value)
+    elseif key == vim.keycode("<BS>") or key == "\8" or key == "\127" then
+      if cursor > 0 then splice(cursor - 1, cursor, ""); cursor = cursor - 1 end
+    elseif key == vim.keycode("<Del>") then
+      if cursor < vim.fn.strchars(value) then splice(cursor, cursor + 1, "") end
+    elseif key == "\21" then splice(0, cursor, ""); cursor = 0
+    elseif key == "\23" then
+      local before = value:sub(1, vim.str_byteindex(value, cursor))
+      local shortened = before:gsub("%s*%S+%s*$", "")
+      splice(vim.fn.strchars(shortened), cursor, ""); cursor = vim.fn.strchars(shortened)
+    elseif key:byte() and key:byte() >= 32 and key:byte() ~= 127 then
+      splice(cursor, cursor, key); cursor = cursor + vim.fn.strchars(key)
+    end
+    render()
+  end
 end
 
 local function setup_highlights()
@@ -642,7 +781,7 @@ local function execute_query()
   local sql = query_text(item)
   if vim.trim(sql) == "" then notify("Query is empty", vim.log.levels.WARN); return end
   if not read_looking(sql) then
-    local answer = vim.fn.confirm("This query may modify data or schema. Run it?", "&Run\n&Cancel", 2)
+    local answer = confirm("This query may modify data or schema. Run it?", "&Run\n&Cancel", 2)
     if answer ~= 1 then return end
   end
   local params = { profile_id=item.profile.id, database=item.database, sql=sql }
@@ -689,9 +828,9 @@ end
 
 close_workspace = function()
   local item=workspace();if not item then return end
-  if item.kind=="query" and vim.bo[item.buf].modified and vim.fn.confirm("Discard modified query?","&Discard\n&Keep",2)~=1 then return end
+  if item.kind=="query" and vim.bo[item.buf].modified and confirm("Discard modified query?","&Discard\n&Keep",2)~=1 then return end
   local changed=0;if item.kind=="table"then changed=select(2,pending_edit_stats(item))end
-  if changed>0 and vim.fn.confirm("Discard staged row changes and close this table?","&Discard\n&Keep",2)~=1 then return end
+  if changed>0 and confirm("Discard staged row changes and close this table?","&Discard\n&Keep",2)~=1 then return end
   if item.buf and vim.api.nvim_buf_is_valid(item.buf) then vim.api.nvim_buf_delete(item.buf,{force=true}) end
   if item.result_buf and vim.api.nvim_buf_is_valid(item.result_buf) then vim.api.nvim_buf_delete(item.result_buf,{force=true}) end
   table.remove(S.workspaces,S.workspace_index);S.workspace_index=math.min(S.workspace_index,#S.workspaces);M.apply_layout(true)
@@ -712,11 +851,6 @@ local function jump(last)
   if S.screen=="profiles" then local _,v=selected_profile();S.profile_index=last and #v or 1;render_profiles();return end
   if S.active_panel=="sidebar" then local _,v=selected_table();S.table_index=last and #v or 1;render_tables();return end
   local win=S.active_panel=="result" and S.result.win or S.main.win;if win and vim.api.nvim_win_is_valid(win)then local item=workspace();local count=vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win));local row=last and count or(item and item.kind=="table"and 3 or 1);local col=vim.api.nvim_win_get_cursor(win)[2];if item and item.kind=="table"and item.mode=="rows"and win==S.main.win then col=cell_byte_col(win,row,(item.cell_starts or{})[item.active_col or 1]or 0)end;pcall(vim.api.nvim_win_set_cursor,win,{row,col})end
-end
-
-local function input(label, default, secret)
-  if secret then return vim.fn.inputsecret(label) end
-  return vim.fn.input(label, default or "")
 end
 
 local driver_labels = { postgres = "PostgreSQL", mssql = "SQL Server", sqlite = "SQLite" }
@@ -938,15 +1072,15 @@ end
 
 local function delete_profile()
   local p=selected_profile();if not p then return end
-  if vim.fn.confirm("Delete connection '"..p.name.."'?","&Delete\n&Cancel",2)~=1 then return end
+  if confirm("Delete connection '"..p.name.."'?","&Delete\n&Cancel",2)~=1 then return end
   request("delete_profile",{id=p.id},function(_,err)if err then notify(backend_error(err),vim.log.levels.ERROR);return end;M.load_profiles()end)
 end
 
 local function search_focused()
-  if S.screen=="profiles" then S.profile_filter=input("Filter connections: ","");S.profile_index=1;render_profiles();return end
-  if S.active_panel=="sidebar" then S.table_filter=input("Filter tables: ","");S.table_index=1;render_tables();return end
+  if S.screen=="profiles" then local value=input("Filter connections: ","");if value==nil then return end;S.profile_filter=value;S.profile_index=1;render_profiles();return end
+  if S.active_panel=="sidebar" then local value=input("Filter tables: ","");if value==nil then return end;S.table_filter=value;S.table_index=1;render_tables();return end
   local item=workspace();if not item or item.kind~="table"then return end
-  if item.mode=="columns" then item.column_filter=input("Filter columns: ","");render_table(item) else item.raw_where=input("WHERE: ","");item.page=0;load_rows(item) end
+  if item.mode=="columns" then local value=input("Filter columns: ","");if value==nil then return end;item.column_filter=value;render_table(item) else local value=input("WHERE: ","");if value==nil then return end;item.raw_where=value;item.page=0;load_rows(item) end
 end
 
 local function current_column(item)
@@ -999,6 +1133,11 @@ local function clipboard_value(value)
   return text
 end
 
+local function clipboard_field(value)
+  if value==vim.NIL or value==nil then return"NULL"end
+  return type(value)=="table"and vim.json.encode(value)or tostring(value)
+end
+
 local function clipboard_row(row)
   local values={};for index,value in ipairs(row or{})do values[index]=clipboard_value(value)end
   return table.concat(values,"\t")
@@ -1009,7 +1148,8 @@ local function copy_focused_line()
   local item=workspace()
   if item and item.kind=="table"and item.mode=="rows"and item.data and buf==item.buf then
     local result=edited_result(item);local data_row=result and result.rows and result.rows[row-2]
-    if data_row then copy_lines({clipboard_row(data_row)},"Copied full row to clipboard");return end
+    local column_index=item.active_col or 1;local column=item.columns and item.columns[column_index]
+    if data_row and column then copy_lines({clipboard_field(data_row[column_index])},"Copied field '"..column.name.."' to clipboard");return end
   end
   copy_lines(vim.api.nvim_buf_get_lines(buf,row-1,row,false))
 end
@@ -1053,7 +1193,7 @@ local function delete_table_rows()
   local noun=#rows==1 and"row"or"rows"
   local marked=#rows>1 and" marked"or""
   local prompt=string.format("Delete %d%s %s from '%s'?\nThis cannot be undone.",#rows,marked,noun,item.title)
-  if vim.fn.confirm(prompt,"&Delete\n&Cancel",2)~=1 then return end
+  if confirm(prompt,"&Delete\n&Cancel",2)~=1 then return end
   local displayed=item.data and #(item.data.rows or{})or 0
   local params=base_params(item);params.rows=rows
   request("delete_rows",params,function(result,err)
@@ -1149,7 +1289,7 @@ save_table_edits = function()
   local edited_rows,edited_fields=pending_edit_stats(item)
   if edited_fields==0 then notify("No row changes to save");return end
   local prompt=string.format("Execute %d staged field %s across %d %s in '%s'?",edited_fields,edited_fields==1 and"update"or"updates",edited_rows,edited_rows==1 and"row"or"rows",item.title)
-  if vim.fn.confirm(prompt,"&Execute\n&Cancel",2)~=1 then return end
+  if confirm(prompt,"&Execute\n&Cancel",2)~=1 then return end
   local identities={};for identity in pairs(item.pending_updates)do identities[#identities+1]=identity end;table.sort(identities)
   local rows={};for _,identity in ipairs(identities)do local edit=item.pending_updates[identity];rows[#rows+1]={key=edit.key,changes=edit.changes}end
   local params=base_params(item);params.rows=rows
@@ -1164,7 +1304,7 @@ end
 discard_table_edits = function()
   local item=workspace();if not item or item.kind~="table"then return end
   local rows,fields=pending_edit_stats(item);if fields==0 then return end
-  if vim.fn.confirm(string.format("Discard %d staged field %s?",fields,fields==1 and"change"or"changes"),"&Discard\n&Keep",2)~=1 then return end
+  if confirm(string.format("Discard %d staged field %s?",fields,fields==1 and"change"or"changes"),"&Discard\n&Keep",2)~=1 then return end
   item.pending_updates={};render_table(item)
 end
 
@@ -1382,7 +1522,7 @@ local function show_help()
     {"Tab/S-Tab","focus panel"},{"Enter","open"},{"b","previous word / back in lists"},{"Backspace","connections"},
   })
   group("Table data",{
-    {"1/2","rows/columns"},{"c","jump to column"},{"v","view full value"},{"yy/y","copy full current/marked rows"},{"/","search or WHERE"},
+    {"1/2","rows/columns"},{"c","jump to column"},{"v","view full value"},{"yy/y","copy current field / marked rows"},{"/","search or WHERE"},
     {"u","unique values"},{"f/F","remove one/all filters"},{"Shift-K/J","sort ascending/descending"},{"[[/]]","previous/next 30 rows"},
   })
   group("Editing",{
@@ -1403,9 +1543,9 @@ local function show_help()
 end
 
 quit = function()
-  for _,item in ipairs(S.workspaces)do if item.kind=="query"and vim.api.nvim_buf_is_valid(item.buf)and vim.bo[item.buf].modified then if vim.fn.confirm("Discard modified queries and quit?","&Quit\n&Cancel",2)~=1 then return end;break end end
-  for _,item in ipairs(S.workspaces)do local fields=0;if item.kind=="table"then fields=select(2,pending_edit_stats(item))end;if fields>0 then if vim.fn.confirm("Discard staged row changes and quit?","&Quit\n&Cancel",2)~=1 then return end;break end end
-  if S.busy>0 and vim.fn.confirm("Queries are still running. Cancel and quit?","&Quit\n&Wait",2)~=1 then return end
+  for _,item in ipairs(S.workspaces)do if item.kind=="query"and vim.api.nvim_buf_is_valid(item.buf)and vim.bo[item.buf].modified then if confirm("Discard modified queries and quit?","&Quit\n&Cancel",2)~=1 then return end;break end end
+  for _,item in ipairs(S.workspaces)do local fields=0;if item.kind=="table"then fields=select(2,pending_edit_stats(item))end;if fields>0 then if confirm("Discard staged row changes and quit?","&Quit\n&Cancel",2)~=1 then return end;break end end
+  if S.busy>0 and confirm("Queries are still running. Cancel and quit?","&Quit\n&Wait",2)~=1 then return end
   vim.cmd("qa!")
 end
 
@@ -1479,4 +1619,6 @@ M._value_text=value_text
 M._value_filetype=value_filetype
 M._format_value=format_value
 M._open_picker=open_picker
+M._confirm=confirm
+M._input=input
 return M
