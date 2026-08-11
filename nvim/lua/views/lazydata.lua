@@ -944,7 +944,7 @@ local function form_display(field,value)
   if field.type=="choice"and field.key=="driver"then return driver_labels[value]or tostring(value or"") end
   if field.type=="boolean"then return value and "● on"or"○ off" end
   if field.type=="password"then return string.rep("•",vim.fn.strchars(value or"")) end
-  return tostring(value or"")
+  return (tostring(value or""):gsub("[\r\n]"," "))
 end
 
 local function set_form_status(form,message,kind)
@@ -969,7 +969,9 @@ render_form = function(form)
   end
   form.actions_started=nil
   lines[#lines+1]="";lines[#lines+1]="  Tab move · Enter edit/select · Ctrl-T test · Ctrl-S save · Esc cancel"
-  form.status_row=#lines+1;lines[#lines+1]="  "..(form.status or"Ready")
+  form.status_row=#lines+1
+  for _,line in ipairs(vim.split(tostring(form.status or"Ready"),"\n",{plain=true}))do lines[#lines+1]="  "..line:gsub("\r$","")end
+  form.status_end_row=#lines
   local config=form_float_config(form,#lines)
   if form.win and vim.api.nvim_win_is_valid(form.win)then vim.api.nvim_win_set_config(form.win,config)end
   vim.bo[form.buf].modifiable=true;vim.api.nvim_buf_set_lines(form.buf,0,-1,false,lines);vim.bo[form.buf].modifiable=false;vim.bo[form.buf].modified=false
@@ -984,7 +986,7 @@ render_form = function(form)
     else vim.api.nvim_buf_set_extmark(form.buf,form_ns,row,2,{end_col=21,hl_group="LazyDataMuted"})end
   end
   local status_hl=form.status_kind=="success"and"LazyDataSuccess"or form.status_kind=="error"and"LazyDataError"or form.status_kind=="working"and"LazyDataAccent"or"LazyDataMuted"
-  vim.api.nvim_buf_set_extmark(form.buf,form_ns,form.status_row-1,2,{end_col=#lines[form.status_row],hl_group=status_hl})
+  for row=form.status_row,form.status_end_row do vim.api.nvim_buf_set_extmark(form.buf,form_ns,row-1,2,{end_col=#lines[row],hl_group=status_hl})end
   if form.win and vim.api.nvim_win_is_valid(form.win)then pcall(vim.api.nvim_win_set_cursor,form.win,{rows[form.index],0})end
 end
 
@@ -998,9 +1000,9 @@ end
 
 local function begin_form_edit(form)
   local field=form.fields[form.index];if not field or(field.type~="text"and field.type~="password")then return end
-  form.editing=true;form.edit_original=form.values[field.key]or"";form.edit_prefix=string.format("  %-19s ",field.label)
-  vim.bo[form.buf].modifiable=true;vim.api.nvim_buf_set_lines(form.buf,field.row-1,field.row,false,{form.edit_prefix..form.edit_original});vim.bo[form.buf].modified=false
-  vim.api.nvim_win_set_cursor(form.win,{field.row,#form.edit_prefix+#form.edit_original});mask_form_password(form,field);vim.cmd.startinsert()
+  form.editing=true;form.edit_original=form.values[field.key]or"";form.values[field.key]=(tostring(form.edit_original):gsub("[\r\n]"," "));form.edit_prefix=string.format("  %-19s ",field.label)
+  vim.bo[form.buf].modifiable=true;vim.api.nvim_buf_set_lines(form.buf,field.row-1,field.row,false,{form.edit_prefix..form.values[field.key]});vim.bo[form.buf].modified=false
+  vim.api.nvim_win_set_cursor(form.win,{field.row,#form.edit_prefix+#form.values[field.key]});mask_form_password(form,field);vim.cmd.startinsert()
 end
 
 commit_form_edit = function(form,cancel)
