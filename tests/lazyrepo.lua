@@ -65,4 +65,23 @@ lazyrepo._confirm("Proceed?", function() accepted = true end)
 vim.cmd("normal y")
 assert(lazyrepo._state.confirm_dialog == nil and accepted)
 
+local message = lazyrepo._notify("A centered message")
+assert(message and vim.api.nvim_win_is_valid(message.win))
+config = vim.api.nvim_win_get_config(message.win)
+assert(config.relative == "editor" and config.title[1][1] == " Lazyrepo ")
+assert(config.footer[1][1]:find("Enter/Esc/q close", 1, true))
+assert(config.row >= 0 and config.col >= 0)
+vim.cmd("normal q")
+assert(lazyrepo._state.message_dialog == nil)
+
+lazyrepo._help()
+local help_dialog = lazyrepo._state.message_dialog
+assert(help_dialog and vim.api.nvim_win_is_valid(help_dialog.win))
+config = vim.api.nvim_win_get_config(help_dialog.win)
+assert(config.title[1][1] == " Lazyrepo keymap ")
+local help_text = table.concat(vim.api.nvim_buf_get_lines(help_dialog.buf, 0, -1, false), "\n")
+assert(help_text:find("Navigation", 1, true) and help_text:find("Repository", 1, true))
+vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+assert(lazyrepo._state.message_dialog == nil)
+
 print("lazyrepo parser tests: ok")

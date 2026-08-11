@@ -6,11 +6,12 @@ local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "re
   dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
   watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false,
   fetch_timer = nil, fetch_request = nil,
-  confirm_dialog = nil,
+  confirm_dialog = nil, message_dialog = nil,
   commit_prompt_win = nil, commit_prompt_buf = nil, commit_history = nil, commit_history_index = nil,
   commit_prompt_draft = nil }
 
 local ns = vim.api.nvim_create_namespace("lazyrepo")
+local message_ns = vim.api.nvim_create_namespace("lazyrepo_message")
 
 local function setup_highlights()
   local hl = vim.api.nvim_set_hl
@@ -33,8 +34,117 @@ local function setup_highlights()
   hl(0, "LazyrepoTitleActive", { fg = added.fg, bold = true })
 end
 
+local close_message
+
+local function message_lines(message, width, preformatted)
+  local available = math.max(1, width - 4)
+  local lines = { "" }
+  for _, paragraph in ipairs(vim.split(tostring(message or ""), "\n", { plain = true })) do
+    if preformatted or paragraph == "" then
+      lines[#lines + 1] = "  " .. paragraph
+    else
+      local line = ""
+      for word in paragraph:gmatch("%S+") do
+        local candidate = line == "" and word or line .. " " .. word
+        if line ~= "" and vim.fn.strdisplaywidth(candidate) > available then
+          lines[#lines + 1] = "  " .. line
+          line = word
+        else
+          line = candidate
+        end
+      end
+      lines[#lines + 1] = "  " .. line
+    end
+  end
+  lines[#lines + 1] = ""
+  return lines
+end
+
+local function message_config(dialog)
+  local width = math.max(1, math.min(76, vim.o.columns - 4))
+  local lines = message_lines(dialog.message, width, dialog.preformatted)
+  local max_height = math.max(1, vim.o.lines - vim.o.cmdheight - 4)
+  local height = math.max(1, math.min(#lines, max_height))
+  return {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title = dialog.title,
+    title_pos = "center",
+    footer = " Enter/Esc/q close ",
+    footer_pos = "center",
+    width = width,
+    height = height,
+    row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - height - 2) / 2)),
+    col = math.max(0, math.floor((vim.o.columns - width - 2) / 2)),
+    zindex = 80,
+  }, lines
+end
+
+local function render_message(dialog)
+  if S.message_dialog ~= dialog or not vim.api.nvim_buf_is_valid(dialog.buf) then return end
+  local config, lines = message_config(dialog)
+  if dialog.win and vim.api.nvim_win_is_valid(dialog.win) then vim.api.nvim_win_set_config(dialog.win, config) end
+  vim.bo[dialog.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(dialog.buf, 0, -1, false, lines)
+  vim.bo[dialog.buf].modifiable = false
+end
+
+close_message = function(dialog, restore_focus)
+  if not dialog or S.message_dialog ~= dialog then return end
+  S.message_dialog = nil
+  if dialog.resize_autocmd then pcall(vim.api.nvim_del_autocmd, dialog.resize_autocmd) end
+  if dialog.win and vim.api.nvim_win_is_valid(dialog.win) then pcall(vim.api.nvim_win_close, dialog.win, true) end
+  if dialog.buf and vim.api.nvim_buf_is_valid(dialog.buf) then
+    pcall(vim.api.nvim_buf_delete, dialog.buf, { force = true })
+  end
+  if restore_focus ~= false and dialog.return_win and vim.api.nvim_win_is_valid(dialog.return_win) then
+    pcall(vim.api.nvim_set_current_win, dialog.return_win)
+  end
+  if restore_focus ~= false and dialog.after_close then dialog.after_close() end
+end
+
+local function notify(message, level, preformatted, custom_title)
+  message = tostring(message or "")
+  level = level or vim.log.levels.INFO
+  if S.message_dialog then close_message(S.message_dialog, false) end
+  local dialog = {
+    message = message,
+    preformatted = preformatted == true,
+    title = custom_title or (level >= vim.log.levels.ERROR and " Lazyrepo error "
+      or level >= vim.log.levels.WARN and " Lazyrepo warning " or " Lazyrepo "),
+    return_win = vim.api.nvim_get_current_win(),
+    buf = vim.api.nvim_create_buf(false, true),
+  }
+  vim.bo[dialog.buf].buftype = "nofile"
+  vim.bo[dialog.buf].bufhidden = "wipe"
+  vim.bo[dialog.buf].swapfile = false
+  local config, lines = message_config(dialog)
+  vim.api.nvim_buf_set_lines(dialog.buf, 0, -1, false, lines)
+  vim.bo[dialog.buf].modifiable = false
+  dialog.win = vim.api.nvim_open_win(dialog.buf, true, config)
+  S.message_dialog = dialog
+  vim.wo[dialog.win].cursorline = false
+  vim.wo[dialog.win].number = false
+  vim.wo[dialog.win].relativenumber = false
+  vim.wo[dialog.win].signcolumn = "no"
+  vim.wo[dialog.win].wrap = true
+  vim.wo[dialog.win].linebreak = true
+  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  local opts = { buffer = dialog.buf, silent = true, nowait = true }
+  for _, key in ipairs({ "<CR>", "<Esc>", "q" }) do
+    vim.keymap.set("n", key, function() close_message(dialog) end, opts)
+  end
+  dialog.resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
+    callback = function()
+      if S.message_dialog == dialog then vim.schedule(function() render_message(dialog) end) end
+    end,
+  })
+  return dialog
+end
+
 local function notify_error(message)
-  if message and message ~= "" then vim.notify(message, vim.log.levels.ERROR, { title = "lazyrepo: Git error" }) end
+  if message and message ~= "" then notify(message, vim.log.levels.ERROR, false, " Lazyrepo Git error ") end
 end
 
 local function panel(name) return S.panels[name] end
@@ -535,7 +645,14 @@ local function commit()
   local function submit()
     local message = prompt_message(buf)
     if vim.trim(message) == "" then
-      vim.notify("lazyrepo: commit message is empty", vim.log.levels.WARN)
+      pcall(vim.cmd, "stopinsert")
+      local dialog = notify("Commit message is empty", vim.log.levels.WARN)
+      dialog.after_close = function()
+        if S.commit_prompt_win and vim.api.nvim_win_is_valid(S.commit_prompt_win) then
+          vim.api.nvim_set_current_win(S.commit_prompt_win)
+          vim.cmd("startinsert!")
+        end
+      end
       return
     end
     close_commit_prompt()
@@ -763,7 +880,44 @@ local function push()
 end
 
 local function help()
-  vim.notify("h/l or Tab/S-Tab panels · j/k move · gg/G top/bottom · Enter open/show commits · Esc show files · e edit file · Space stage/checkout/apply · a stage all · i ignore · d discard/drop · c commit · s stash · M merge · r rebase · gp pop · p pull · P push · R refresh · q quit", vim.log.levels.INFO, { title = "lazyrepo keys" })
+  local lines, headings, shortcuts = {}, {}, {}
+  local function group(title, bindings)
+    headings[#headings + 1] = #lines + 1
+    lines[#lines + 1] = title
+    for _, binding in ipairs(bindings) do
+      shortcuts[#shortcuts + 1] = { row = #lines + 1, length = #binding[1] }
+      lines[#lines + 1] = string.format("  %-12s %s", binding[1], binding[2])
+    end
+    lines[#lines + 1] = ""
+  end
+  group("Navigation", {
+    { "j/k", "move" }, { "gg/G", "first/last item" }, { "h/l", "previous/next panel" },
+    { "Tab/S-Tab", "focus panel" }, { "Enter", "open/show commits" }, { "Esc", "back/show files" },
+  })
+  group("Files", {
+    { "Space", "stage/unstage" }, { "a", "stage/unstage all" }, { "e", "edit in parent" },
+    { "i", "ignore and untrack" }, { "d", "discard changes" },
+  })
+  group("Branches", {
+    { "Space", "checkout" }, { "d", "delete" }, { "M", "merge" }, { "r", "rebase" },
+  })
+  group("Stashes", {
+    { "Space", "apply" }, { "gp", "pop" }, { "d", "drop" },
+  })
+  group("Repository", {
+    { "c", "commit" }, { "s", "stash" }, { "p/P", "pull/push" }, { "R", "refresh" },
+    { "]c/]s/]a", "continue/skip/abort conflict" }, { "q", "quit" },
+  })
+  table.remove(lines)
+  local dialog = notify(table.concat(lines, "\n"), vim.log.levels.INFO, true, " Lazyrepo keymap ")
+  for _, row in ipairs(headings) do
+    vim.api.nvim_buf_set_extmark(dialog.buf, message_ns, row, 2,
+      { end_col = 2 + #lines[row], hl_group = "LazyrepoTitleActive" })
+  end
+  for _, shortcut in ipairs(shortcuts) do
+    vim.api.nvim_buf_set_extmark(dialog.buf, message_ns, shortcut.row, 4,
+      { end_col = 4 + shortcut.length, hl_group = "LazyrepoAhead" })
+  end
 end
 
 local function back()
@@ -937,4 +1091,6 @@ end
 
 M._state = S
 M._confirm = confirm
+M._notify = notify
+M._help = help
 return M
