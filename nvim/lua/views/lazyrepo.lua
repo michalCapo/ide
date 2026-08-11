@@ -6,12 +6,13 @@ local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "re
   dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
   watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false,
   fetch_timer = nil, fetch_request = nil,
-  confirm_dialog = nil, message_dialog = nil,
+  confirm_dialog = nil, message_dialog = nil, prompt_dialog = nil,
   commit_prompt_win = nil, commit_prompt_buf = nil, commit_history = nil, commit_history_index = nil,
   commit_prompt_draft = nil }
 
 local ns = vim.api.nvim_create_namespace("lazyrepo")
 local message_ns = vim.api.nvim_create_namespace("lazyrepo_message")
+local prompt_ns = vim.api.nvim_create_namespace("lazyrepo_prompt")
 
 local function setup_highlights()
   local hl = vim.api.nvim_set_hl
@@ -32,6 +33,7 @@ local function setup_highlights()
   hl(0, "LazyrepoCurrent", { fg = added.fg, bold = true })
   hl(0, "LazyrepoTitle", { fg = comment.fg })
   hl(0, "LazyrepoTitleActive", { fg = added.fg, bold = true })
+  hl(0, "LazyrepoSelected", { link = "Visual" })
 end
 
 local close_message
@@ -144,7 +146,9 @@ local function notify(message, level, preformatted, custom_title)
 end
 
 local function notify_error(message)
-  if message and message ~= "" then notify(message, vim.log.levels.ERROR, false, " Lazyrepo Git error ") end
+  if message and message ~= "" then
+    return notify(message, vim.log.levels.ERROR, false, " Lazyrepo Git error ")
+  end
 end
 
 local function panel(name) return S.panels[name] end
@@ -505,6 +509,174 @@ local function confirm(prompt, callback)
   })
 end
 
+local function prompt_frame_config(title, width, height, footer)
+  width = math.max(1, math.min(width, vim.o.columns - 4))
+  height = math.max(1, math.min(height, vim.o.lines - vim.o.cmdheight - 4))
+  return {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title = " " .. title .. " ",
+    title_pos = "center",
+    footer = footer,
+    footer_pos = "center",
+    width = width,
+    height = height,
+    row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - height - 2) / 2)),
+    col = math.max(0, math.floor((vim.o.columns - width - 2) / 2)),
+    zindex = 90,
+  }
+end
+
+local function close_prompt(dialog, value, index, invoke_callback)
+  if not dialog or S.prompt_dialog ~= dialog then return end
+  S.prompt_dialog = nil
+  pcall(vim.cmd, "stopinsert")
+  if dialog.resize_autocmd then pcall(vim.api.nvim_del_autocmd, dialog.resize_autocmd) end
+  if dialog.win and vim.api.nvim_win_is_valid(dialog.win) then pcall(vim.api.nvim_win_close, dialog.win, true) end
+  if dialog.buf and vim.api.nvim_buf_is_valid(dialog.buf) then
+    pcall(vim.api.nvim_buf_delete, dialog.buf, { force = true })
+  end
+  if dialog.return_win and vim.api.nvim_win_is_valid(dialog.return_win) then
+    pcall(vim.api.nvim_set_current_win, dialog.return_win)
+  end
+  if invoke_callback ~= false and dialog.callback then dialog.callback(value, index) end
+end
+
+local function choice_config(dialog)
+  local width = math.max(36, vim.fn.strdisplaywidth(dialog.title) + 4)
+  for _, item in ipairs(dialog.items) do width = math.max(width, vim.fn.strdisplaywidth(tostring(item)) + 4) end
+  width = math.min(width, 72)
+  return prompt_frame_config(dialog.title, width, #dialog.items + 2,
+    " j/k move · Enter select · Esc cancel ")
+end
+
+local function render_choice(dialog)
+  if S.prompt_dialog ~= dialog or not vim.api.nvim_buf_is_valid(dialog.buf) then return end
+  local lines = { "" }
+  for _, item in ipairs(dialog.items) do lines[#lines + 1] = "  " .. tostring(item) end
+  lines[#lines + 1] = ""
+  vim.bo[dialog.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(dialog.buf, 0, -1, false, lines)
+  vim.bo[dialog.buf].modifiable = false
+  vim.api.nvim_buf_clear_namespace(dialog.buf, prompt_ns, 0, -1)
+  vim.api.nvim_buf_set_extmark(dialog.buf, prompt_ns, dialog.index, 0,
+    { line_hl_group = "LazyrepoSelected" })
+  if dialog.win and vim.api.nvim_win_is_valid(dialog.win) then
+    vim.api.nvim_win_set_config(dialog.win, choice_config(dialog))
+    vim.api.nvim_win_set_cursor(dialog.win, { dialog.index + 1, 0 })
+  end
+end
+
+local function select_dialog(items, opts, callback)
+  opts = opts or {}
+  if not items or #items == 0 then callback(nil, nil); return nil end
+  if S.prompt_dialog then close_prompt(S.prompt_dialog, nil, nil, false) end
+  local title = vim.trim(tostring(opts.prompt or opts.title or "Select")):gsub(":$", "")
+  local dialog = {
+    items = items,
+    index = math.max(1, math.min(#items, opts.default or 1)),
+    title = title ~= "" and title or "Select",
+    callback = callback,
+    return_win = vim.api.nvim_get_current_win(),
+    buf = vim.api.nvim_create_buf(false, true),
+  }
+  vim.bo[dialog.buf].buftype = "nofile"
+  vim.bo[dialog.buf].bufhidden = "wipe"
+  vim.bo[dialog.buf].swapfile = false
+  dialog.win = vim.api.nvim_open_win(dialog.buf, true, choice_config(dialog))
+  S.prompt_dialog = dialog
+  vim.wo[dialog.win].cursorline = false
+  vim.wo[dialog.win].number = false
+  vim.wo[dialog.win].relativenumber = false
+  vim.wo[dialog.win].signcolumn = "no"
+  vim.wo[dialog.win].wrap = false
+  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  local function move_choice(delta)
+    dialog.index = (dialog.index - 1 + delta) % #dialog.items + 1
+    render_choice(dialog)
+  end
+  local map_opts = { buffer = dialog.buf, silent = true, nowait = true }
+  for _, key in ipairs({ "j", "<Down>", "<Tab>" }) do
+    vim.keymap.set("n", key, function() move_choice(1) end, map_opts)
+  end
+  for _, key in ipairs({ "k", "<Up>", "<S-Tab>" }) do
+    vim.keymap.set("n", key, function() move_choice(-1) end, map_opts)
+  end
+  vim.keymap.set("n", "gg", function() dialog.index = 1; render_choice(dialog) end, map_opts)
+  vim.keymap.set("n", "G", function() dialog.index = #dialog.items; render_choice(dialog) end, map_opts)
+  vim.keymap.set("n", "<CR>", function()
+    close_prompt(dialog, dialog.items[dialog.index], dialog.index)
+  end, map_opts)
+  for _, key in ipairs({ "<Esc>", "q" }) do
+    vim.keymap.set("n", key, function() close_prompt(dialog, nil, nil) end, map_opts)
+  end
+  dialog.resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
+    callback = function()
+      if S.prompt_dialog == dialog then vim.schedule(function() render_choice(dialog) end) end
+    end,
+  })
+  render_choice(dialog)
+  return dialog
+end
+
+local function input_config(dialog)
+  local width = math.max(36, vim.fn.strdisplaywidth(dialog.title) + 6)
+  if dialog.buf and vim.api.nvim_buf_is_valid(dialog.buf) then
+    local value = vim.api.nvim_buf_get_lines(dialog.buf, 0, 1, false)[1] or ""
+    width = math.max(width, vim.fn.strdisplaywidth(value) + 4)
+  end
+  return prompt_frame_config(dialog.title, math.min(width, 72), 1, " Enter apply · Esc cancel ")
+end
+
+local function input_dialog(opts, callback)
+  opts = opts or {}
+  if S.prompt_dialog then close_prompt(S.prompt_dialog, nil, nil, false) end
+  local title = vim.trim(tostring(opts.prompt or opts.title or "Input")):gsub(":$", "")
+  local default = tostring(opts.default or "")
+  local dialog = {
+    title = title ~= "" and title or "Input",
+    callback = callback,
+    return_win = vim.api.nvim_get_current_win(),
+    buf = vim.api.nvim_create_buf(false, true),
+  }
+  vim.bo[dialog.buf].buftype = "nofile"
+  vim.bo[dialog.buf].bufhidden = "wipe"
+  vim.bo[dialog.buf].swapfile = false
+  vim.api.nvim_buf_set_lines(dialog.buf, 0, -1, false, { default })
+  dialog.win = vim.api.nvim_open_win(dialog.buf, true, input_config(dialog))
+  S.prompt_dialog = dialog
+  vim.wo[dialog.win].number = false
+  vim.wo[dialog.win].relativenumber = false
+  vim.wo[dialog.win].signcolumn = "no"
+  vim.wo[dialog.win].wrap = false
+  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  vim.api.nvim_win_set_cursor(dialog.win, { 1, #default })
+  local function submit()
+    local value = vim.api.nvim_buf_get_lines(dialog.buf, 0, 1, false)[1] or ""
+    close_prompt(dialog, value, nil)
+  end
+  local map_opts = { buffer = dialog.buf, silent = true, nowait = true }
+  vim.keymap.set({ "i", "n" }, "<CR>", submit, map_opts)
+  for _, key in ipairs({ "<Esc>", "<C-c>" }) do
+    vim.keymap.set({ "i", "n" }, key, function() close_prompt(dialog, nil, nil) end, map_opts)
+  end
+  vim.keymap.set("n", "q", function() close_prompt(dialog, nil, nil) end, map_opts)
+  dialog.resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
+    callback = function()
+      if S.prompt_dialog == dialog and vim.api.nvim_win_is_valid(dialog.win) then
+        vim.schedule(function()
+          if S.prompt_dialog == dialog and vim.api.nvim_win_is_valid(dialog.win) then
+            vim.api.nvim_win_set_config(dialog.win, input_config(dialog))
+          end
+        end)
+      end
+    end,
+  })
+  vim.cmd("startinsert!")
+  return dialog
+end
+
 local function stage_selection()
   local item = selected("files"); if not item or item.placeholder then return end
   local path = item.path
@@ -682,9 +854,9 @@ local function commit()
 end
 
 local function stash()
-  vim.ui.select({ "Everything (including untracked)", "Tracked", "Staged", "Unstaged" }, { prompt = "Stash scope:" }, function(scope)
+  select_dialog({ "Everything (including untracked)", "Tracked", "Staged", "Unstaged" }, { prompt = "Stash scope" }, function(scope)
     if not scope then return end
-    vim.ui.input({ prompt = "Optional stash message: " }, function(message)
+    input_dialog({ prompt = "Optional stash message" }, function(message)
       local args = { "stash", "push" }
       if scope:match("Everything") then args[#args + 1] = "--include-untracked"
       elseif scope == "Staged" then args[#args + 1] = "--staged"
@@ -799,7 +971,7 @@ local function delete_branch()
   if item.current then notify_error("The checked-out branch cannot be deleted"); return end
   if name == "locals" then
     local choices = item.upstream ~= "" and { "Local and tracked remote", "Local only", "Cancel" } or { "Local only", "Cancel" }
-    vim.ui.select(choices, { prompt = "Delete " .. item.name .. ":" }, function(choice)
+    select_dialog(choices, { prompt = "Delete " .. item.name }, function(choice)
       if not choice or choice == "Cancel" then return end
       local function remove_local(force)
         local _, err = git.git(S.root, { "branch", force and "-D" or "-d", item.name })
@@ -821,7 +993,7 @@ local function delete_branch()
     local tracking
     for _, local_ref in ipairs(panel("locals").items) do if local_ref.upstream == item.name then tracking = local_ref.name; break end end
     local choices = tracking and { "Remote and tracking local", "Remote only", "Cancel" } or { "Remote only", "Cancel" }
-    vim.ui.select(choices, { prompt = "Delete " .. item.name .. ":" }, function(choice)
+    select_dialog(choices, { prompt = "Delete " .. item.name }, function(choice)
       if not choice or choice == "Cancel" then return end
       if choice:match("tracking") then git.git(S.root, { "branch", "-d", tracking }) end
       run({ "push", remote, "--delete", branch }, "Delete remote branch", true)
@@ -874,7 +1046,7 @@ local function push()
   if current and current.upstream ~= "" then run({ "push" }, "Push", true); return end
   local remotes = git.git(S.root, { "remote" }) or ""
   local choices = vim.split(vim.trim(remotes), "\n", { trimempty = true })
-  vim.ui.select(choices, { prompt = "Push to remote:" }, function(remote)
+  select_dialog(choices, { prompt = "Push to remote" }, function(remote)
     if remote then run({ "push", "-u", remote, current and current.name or "HEAD" }, "Push", true) end
   end)
 end
@@ -985,6 +1157,10 @@ local function create_panel(name, title, win)
   S.panels[name] = { title = title, win = win, buf = buf, items = {}, index = 1 }; configure(buf)
 end
 
+local function keep_only_current_window()
+  if #vim.api.nvim_tabpage_list_wins(0) > 1 then vim.cmd("silent only") end
+end
+
 local function equalize_columns()
   local content = panel(S.content_panel)
   local locals = panel("locals")
@@ -1024,7 +1200,7 @@ apply_layout = function(force)
   local base = S.dashboard_win
   if not base or not vim.api.nvim_win_is_valid(base) then base = vim.api.nvim_get_current_win() end
   vim.api.nvim_set_current_win(base)
-  vim.cmd("only")
+  keep_only_current_window()
   for _, p in pairs(S.panels) do p.win = nil end
 
   local left = base
@@ -1057,12 +1233,18 @@ end
 
 function M.launch()
   S.root = git.root()
-  if not S.root then notify_error("not inside a Git repository"); vim.cmd("cq"); return end
+  if not S.root then
+    local dialog = notify_error("Not inside a Git repository")
+    dialog.after_close = function()
+      if M._exit_override then M._exit_override() else vim.cmd("cq") end
+    end
+    return
+  end
   pcall(function() require("views.lazydiff").setup_standalone_ui() end)
   setup_highlights()
   vim.api.nvim_create_autocmd("ColorScheme", { callback = setup_highlights })
   vim.o.termguicolors = true; vim.o.laststatus = 2; vim.o.showtabline = 0
-  vim.cmd("only"); local left = vim.api.nvim_get_current_win()
+  keep_only_current_window(); local left = vim.api.nvim_get_current_win()
   vim.cmd("rightbelow vsplit"); local branches = vim.api.nvim_get_current_win()
   vim.cmd("rightbelow split"); local remotes = vim.api.nvim_get_current_win()
   vim.cmd("rightbelow split"); local stashes = vim.api.nvim_get_current_win()
@@ -1093,4 +1275,6 @@ M._state = S
 M._confirm = confirm
 M._notify = notify
 M._help = help
+M._select = select_dialog
+M._input = input_dialog
 return M

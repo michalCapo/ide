@@ -84,4 +84,41 @@ assert(help_text:find("Navigation", 1, true) and help_text:find("Repository", 1,
 vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
 assert(lazyrepo._state.message_dialog == nil)
 
+local selected_value, selected_index
+lazyrepo._select({ "First", "Second" }, { prompt = "Choose item:" }, function(value, index)
+  selected_value, selected_index = value, index
+end)
+local choice_dialog = lazyrepo._state.prompt_dialog
+assert(choice_dialog and vim.api.nvim_win_is_valid(choice_dialog.win))
+config = vim.api.nvim_win_get_config(choice_dialog.win)
+assert(config.relative == "editor" and config.title[1][1] == " Choose item ")
+vim.api.nvim_feedkeys("j", "x", false)
+vim.api.nvim_feedkeys("\r", "x", false)
+assert(lazyrepo._state.prompt_dialog == nil)
+assert(selected_value == "Second" and selected_index == 2)
+
+local input_value
+lazyrepo._input({ prompt = "Optional message", default = "draft" }, function(value) input_value = value end)
+local input_dialog = lazyrepo._state.prompt_dialog
+assert(input_dialog and vim.api.nvim_win_is_valid(input_dialog.win))
+config = vim.api.nvim_win_get_config(input_dialog.win)
+assert(config.relative == "editor" and config.title[1][1] == " Optional message ")
+vim.api.nvim_buf_set_lines(input_dialog.buf, 0, -1, false, { "finished" })
+vim.api.nvim_feedkeys("\r", "x", false)
+assert(lazyrepo._state.prompt_dialog == nil and input_value == "finished")
+
+local original_root = git.root
+local exited = false
+git.root = function() return nil end
+lazyrepo._exit_override = function() exited = true end
+lazyrepo.launch()
+git.root = original_root
+local startup_error = lazyrepo._state.message_dialog
+assert(startup_error and vim.api.nvim_win_is_valid(startup_error.win) and not exited)
+assert(table.concat(vim.api.nvim_buf_get_lines(startup_error.buf, 0, -1, false), "\n")
+  :find("Not inside a Git repository", 1, true))
+vim.api.nvim_feedkeys("q", "x", false)
+assert(lazyrepo._state.message_dialog == nil and exited)
+lazyrepo._exit_override = nil
+
 print("lazyrepo parser tests: ok")
