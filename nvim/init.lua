@@ -2422,6 +2422,17 @@ vim.api.nvim_create_autocmd("FileType", {
       desc = "Open file in main window and close explorer",
       silent = true,
     })
+    vim.keymap.set("n", "h", "-", {
+      buffer = event.buf,
+      desc = "Go to parent directory",
+      remap = true,
+      silent = true,
+    })
+    vim.keymap.set("n", "l", netrw_open_in_main_and_close_sidebar, {
+      buffer = event.buf,
+      desc = "Open file or directory",
+      silent = true,
+    })
     vim.keymap.set("n", "<esc>", _G.nvim_hide_file_explorer_and_focus_file_buffer, {
       buffer = event.buf,
       desc = "Hide file explorer and focus file buffer",
