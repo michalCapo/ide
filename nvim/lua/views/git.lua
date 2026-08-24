@@ -161,6 +161,15 @@ end
 
 
 function M.commits(root, ref, limit)
+  -- HEAD is valid but does not resolve until an initial commit is created.
+  -- Treat that unborn-branch state as an empty history, while still surfacing
+  -- failures from rev-parse and git log.
+  if ref == "HEAD" then
+    local _, verify_err, result = M.git(root,
+      { "rev-parse", "--verify", "--quiet", "HEAD^{commit}" }, { allowed_codes = { 0, 1 } })
+    if verify_err then return nil, verify_err end
+    if result.code == 1 then return {} end
+  end
   local out, err = M.git(root, { "log", "--date=short", "--format=%H%x00%h%x00%ad%x00%an%x00%s", "--max-count=" .. (limit or 200), ref })
   if not out then return nil, err end
   local commits = {}
