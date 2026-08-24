@@ -1413,8 +1413,14 @@ open_picker = function(title,items,format,choose,start_filter,options)
   local opts={buffer=picker.buf,silent=true,nowait=true}
   local function move_picker(delta)picker.index=math.max(1,math.min(#picker.filtered,picker.index+delta));render_picker(picker)end
   local function set_filter(filter)if S.picker~=picker then return end;picker.filter=filter or"";picker.index=1;picker.first=1;render_picker(picker)end
+  local function append_filter(text)if S.picker~=picker or not picker.editing then return end;set_filter((picker.filter or"")..text)end
   local function delete_filter()local length=vim.fn.strchars(picker.filter or"");if length>0 then set_filter(vim.fn.strcharpart(picker.filter,0,length-1))end end
-  local function begin_filter()if picker.editing then return end;picker.editing=true;picker.filter_prefix=string.format("  %-12s ","Filter");render_picker(picker)end
+  local function begin_filter()
+    if picker.editing then return end
+    picker.editing=true;picker.filter_prefix=string.format("  %-12s ","Filter")
+    for code=32,126 do local char=string.char(code);vim.keymap.set("n",string.format("<Char-%d>",code),function()append_filter(char)end,opts)end
+    render_picker(picker)
+  end
   picker.set_filter=set_filter;picker.delete_filter=delete_filter
   vim.keymap.set("n","j",function()move_picker(1)end,opts);vim.keymap.set("n","k",function()move_picker(-1)end,opts);vim.keymap.set("n","gg",function()picker.index=1;render_picker(picker)end,opts);vim.keymap.set("n","G",function()picker.index=#picker.filtered;render_picker(picker)end,opts)
   vim.keymap.set("n","<C-n>",function()move_picker(1)end,opts);vim.keymap.set("n","<C-p>",function()move_picker(-1)end,opts);vim.keymap.set("n","<Down>",function()move_picker(1)end,opts);vim.keymap.set("n","<Up>",function()move_picker(-1)end,opts)
@@ -1423,7 +1429,7 @@ open_picker = function(title,items,format,choose,start_filter,options)
   if options.action_key and options.action then vim.keymap.set("n",options.action_key,function()close_picker(picker);options.action()end,opts)end
   vim.keymap.set("n","<BS>",delete_filter,opts);vim.keymap.set("n","<C-h>",delete_filter,opts);vim.keymap.set("n","<C-u>",function()set_filter("")end,opts)
   picker.key_ns=vim.api.nvim_create_namespace("lazydata_picker_keys")
-  vim.on_key(function(key,typed)if S.picker==picker and picker.editing and typed~=""and key==typed and not typed:find("%c")then picker.filter=(picker.filter or"")..typed;picker.index=1;picker.first=1;render_picker(picker);return""end end,picker.key_ns)
+  vim.on_key(function(_,typed)if S.picker==picker and picker.editing and typed~=""and not typed:find("%c")then append_filter(typed);return""end end,picker.key_ns)
   picker.resize_autocmd=vim.api.nvim_create_autocmd("VimResized",{callback=function()if S.picker==picker then vim.schedule(function()render_picker(picker)end)end end});render_picker(picker);if start_filter~=false then begin_filter()end
 end
 
