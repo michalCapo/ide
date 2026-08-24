@@ -1409,7 +1409,7 @@ open_picker = function(title,items,format,choose,start_filter,options)
   if S.picker then close_picker(S.picker)end
   options=options or{}
   local picker={title=title,items=items or{},format=format or tostring,choose=choose,filter="",index=1,first=1,return_win=vim.api.nvim_get_current_win(),select_label=options.select_label,action_hint=options.action_hint};picker.hint_width=picker.action_hint and vim.fn.strdisplaywidth("  type filter · Ctrl-N/P move · "..picker.action_hint.." · Enter "..(picker.select_label or"select").." · Esc cancel")+2 or 0;picker.buf=make_buf("picker",false);picker.win=vim.api.nvim_open_win(picker.buf,true,picker_config(picker,10));S.picker=picker
-  vim.wo[picker.win].cursorline=false;vim.wo[picker.win].number=false;vim.wo[picker.win].relativenumber=false;vim.wo[picker.win].signcolumn="no";vim.wo[picker.win].wrap=false
+  vim.wo[picker.win].cursorline=false;vim.wo[picker.win].number=false;vim.wo[picker.win].relativenumber=false;vim.wo[picker.win].signcolumn="no";vim.wo[picker.win].wrap=false;vim.wo[picker.win].virtualedit="onemore"
   local opts={buffer=picker.buf,silent=true,nowait=true}
   local function move_picker(delta)picker.index=math.max(1,math.min(#picker.filtered,picker.index+delta));render_picker(picker)end
   local function set_filter(filter)if S.picker~=picker then return end;picker.filter=filter or"";picker.index=1;picker.first=1;render_picker(picker)end
@@ -1429,7 +1429,7 @@ open_picker = function(title,items,format,choose,start_filter,options)
   if options.action_key and options.action then vim.keymap.set("n",options.action_key,function()close_picker(picker);options.action()end,opts)end
   vim.keymap.set("n","<BS>",delete_filter,opts);vim.keymap.set("n","<C-h>",delete_filter,opts);vim.keymap.set("n","<C-u>",function()set_filter("")end,opts)
   picker.key_ns=vim.api.nvim_create_namespace("lazydata_picker_keys")
-  vim.on_key(function(_,typed)if S.picker==picker and picker.editing and typed~=""and not typed:find("%c")then append_filter(typed);return""end end,picker.key_ns)
+  vim.on_key(function(_,typed)local text=vim.fn.keytrans(typed);if S.picker==picker and picker.editing and typed~=""and text==typed and not typed:find("%c")then append_filter(typed);return""end end,picker.key_ns)
   picker.resize_autocmd=vim.api.nvim_create_autocmd("VimResized",{callback=function()if S.picker==picker then vim.schedule(function()render_picker(picker)end)end end});render_picker(picker);if start_filter~=false then begin_filter()end
 end
 
