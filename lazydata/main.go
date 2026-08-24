@@ -1157,6 +1157,7 @@ func (s *Server) updateRows(req Request) (any, error) {
 type distinctParams struct {
 	rowsParams
 	Column string `json:"column"`
+	Search string `json:"search"`
 }
 
 func (s *Server) distinct(req Request) (any, error) {
@@ -1172,6 +1173,24 @@ func (s *Server) distinct(req Request) (any, error) {
 	defer done()
 	where, args := whereClause(profile.Driver, p.RawWhere, p.Predicates)
 	col := quoteIdent(profile.Driver, p.Column)
+	if p.Search != "" {
+		search := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(p.Search)
+		args = append(args, "%"+search+"%")
+		match := "LOWER(CAST(" + col + " AS TEXT)) LIKE LOWER(" + placeholder(profile.Driver, len(args)) + ") ESCAPE '\\'"
+		if profile.Driver == "postgres" {
+			match = "CAST(" + col + " AS TEXT) ILIKE " + placeholder(profile.Driver, len(args)) + " ESCAPE '\\'"
+		} else if profile.Driver == "mssql" {
+			match = "LOWER(CAST(" + col + " AS NVARCHAR(MAX))) LIKE LOWER(" + placeholder(profile.Driver, len(args)) + ") ESCAPE '\\'"
+		}
+		if strings.Contains("null", strings.ToLower(p.Search)) {
+			match = "(" + match + " OR " + col + " IS NULL)"
+		}
+		if where == "" {
+			where = " WHERE " + match
+		} else {
+			where += " AND " + match
+		}
+	}
 	table := qualified(profile.Driver, p.Schema, p.Table)
 	query := fmt.Sprintf("SELECT %s, COUNT(*) AS lazydata_count FROM %s%s GROUP BY %s ORDER BY lazydata_count DESC", col, table, where, col)
 	if profile.Driver == "mssql" {

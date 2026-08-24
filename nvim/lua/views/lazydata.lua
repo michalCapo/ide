@@ -1143,11 +1143,24 @@ end
 
 local function distinct_values()
   local item=workspace();local column=current_column(item);if not column then notify("Select a column first",vim.log.levels.WARN);return end
-  local params=base_params(item);params.raw_where=item.raw_where or "";params.predicates=item.predicates or {};params.column=column.name
-  request("distinct",params,function(values,err)
+  local function params(search)local value=base_params(item);value.raw_where=item.raw_where or "";value.predicates=item.predicates or {};value.column=column.name;value.search=search or"";return value end
+  local function choices(values)local result={};for _,entry in ipairs(values or{})do entry._label=string.format("%s  (%s)",value_text(entry.value),entry.count);result[#result+1]=entry end;return result end
+  request("distinct",params(""),function(values,err)
     if err then notify(backend_error(err),vim.log.levels.ERROR);return end
-    local choices={};for _,entry in ipairs(values or {})do entry._label=string.format("%s  (%s)",value_text(entry.value),entry.count);choices[#choices+1]=entry end
-    open_picker("Filter "..column.name,choices,function(v)return v._label end,function(choice)item.predicates[#item.predicates+1]={column=column.name,value=choice.value,is_null=choice.is_null};item.page=0;load_rows(item)end)
+    local search_seq=0
+    open_picker("Filter "..column.name,choices(values),function(v)return v._label end,function(choice)item.predicates[#item.predicates+1]={column=column.name,value=choice.value,is_null=choice.is_null};item.page=0;load_rows(item)end,true,{
+      on_filter=function(filter,picker)
+        search_seq=search_seq+1;local seq=search_seq
+        vim.defer_fn(function()
+          if S.picker~=picker or picker.filter~=filter or search_seq~=seq then return end
+          request("distinct",params(filter),function(matches,search_err)
+            if S.picker~=picker or picker.filter~=filter or search_seq~=seq then return end
+            if search_err then notify(backend_error(search_err),vim.log.levels.ERROR);return end
+            picker.set_items(choices(matches))
+          end)
+        end,120)
+      end,
+    })
   end,true)
 end
 
@@ -1412,7 +1425,8 @@ open_picker = function(title,items,format,choose,start_filter,options)
   vim.wo[picker.win].cursorline=false;vim.wo[picker.win].number=false;vim.wo[picker.win].relativenumber=false;vim.wo[picker.win].signcolumn="no";vim.wo[picker.win].wrap=false;vim.wo[picker.win].virtualedit="onemore"
   local opts={buffer=picker.buf,silent=true,nowait=true}
   local function move_picker(delta)picker.index=math.max(1,math.min(#picker.filtered,picker.index+delta));render_picker(picker)end
-  local function set_filter(filter)if S.picker~=picker then return end;picker.filter=filter or"";picker.index=1;picker.first=1;render_picker(picker)end
+  local function set_filter(filter)if S.picker~=picker then return end;picker.filter=filter or"";picker.index=1;picker.first=1;render_picker(picker);if options.on_filter then options.on_filter(picker.filter,picker)end end
+  local function set_items(items)if S.picker~=picker then return end;picker.items=items or{};picker.index=1;picker.first=1;render_picker(picker)end
   local function append_filter(text)if S.picker~=picker or not picker.editing then return end;set_filter((picker.filter or"")..text)end
   local function delete_filter()local length=vim.fn.strchars(picker.filter or"");if length>0 then set_filter(vim.fn.strcharpart(picker.filter,0,length-1))end end
   local function begin_filter()
@@ -1421,7 +1435,7 @@ open_picker = function(title,items,format,choose,start_filter,options)
     for code=32,126 do local char=string.char(code);vim.keymap.set("n",string.format("<Char-%d>",code),function()append_filter(char)end,opts)end
     render_picker(picker)
   end
-  picker.set_filter=set_filter;picker.delete_filter=delete_filter
+  picker.set_filter=set_filter;picker.set_items=set_items;picker.delete_filter=delete_filter
   vim.keymap.set("n","j",function()move_picker(1)end,opts);vim.keymap.set("n","k",function()move_picker(-1)end,opts);vim.keymap.set("n","gg",function()picker.index=1;render_picker(picker)end,opts);vim.keymap.set("n","G",function()picker.index=#picker.filtered;render_picker(picker)end,opts)
   vim.keymap.set("n","<C-n>",function()move_picker(1)end,opts);vim.keymap.set("n","<C-p>",function()move_picker(-1)end,opts);vim.keymap.set("n","<Down>",function()move_picker(1)end,opts);vim.keymap.set("n","<Up>",function()move_picker(-1)end,opts)
   vim.keymap.set("n","<Tab>",function()move_picker(1)end,opts);vim.keymap.set("n","<S-Tab>",function()move_picker(-1)end,opts);vim.keymap.set("n","/",begin_filter,opts)

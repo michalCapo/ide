@@ -162,6 +162,14 @@ func TestSQLiteFullPath(t *testing.T) {
 	if err != nil || len(distinctValue.([]map[string]any)) != 2 {
 		t.Fatalf("distinct = %#v, %v", distinctValue, err)
 	}
+	nullDistinctValue, err := s.handle(Request{ID: "distinct-null", Method: "distinct", Params: raw(t, distinctParams{rowsParams: rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}}, Column: "team", Search: "null"})})
+	if err != nil {
+		t.Fatalf("NULL distinct search failed: %v", err)
+	}
+	nullDistinct, ok := nullDistinctValue.([]map[string]any)
+	if !ok || len(nullDistinct) != 1 || nullDistinct[0]["is_null"] != true {
+		t.Fatalf("NULL distinct search = %#v, %v", nullDistinctValue, err)
+	}
 	selected := query(`SELECT id, team FROM people ORDER BY id`).([]ResultSet)
 	if len(selected) != 1 || len(selected[0].Rows) != 3 {
 		t.Fatalf("query result = %#v", selected)
@@ -267,6 +275,55 @@ func TestRequestCancellation(t *testing.T) {
 	s.mu.Unlock()
 	if exists {
 		t.Fatal("request cancellation was not cleaned up")
+	}
+}
+
+func TestSQLiteDistinctSearchBeyondInitialLimit(t *testing.T) {
+	s := testServer(t)
+	dbPath := filepath.Join(t.TempDir(), "distinct.db")
+	if err := os.WriteFile(dbPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.saveProfile(Profile{Name: "Local", Driver: "sqlite", Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(sql string) {
+		t.Helper()
+		if _, queryErr := s.handle(Request{ID: sql, Method: "query", Params: raw(t, queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: sql})}); queryErr != nil {
+			t.Fatal(queryErr)
+		}
+	}
+	run(`CREATE TABLE contacts (email TEXT)`)
+	run(`WITH RECURSIVE sequence(id) AS (SELECT 1 UNION ALL SELECT id + 1 FROM sequence WHERE id < 200)
+INSERT INTO contacts(email)
+SELECT printf('common-%03d@skeletonas.sk', id) FROM sequence
+UNION ALL SELECT printf('common-%03d@skeletonas.sk', id) FROM sequence`)
+	run(`INSERT INTO contacts(email) VALUES ('kovacikova@skeletonas.sk'), ('kovacikova@other.sk')`)
+
+	request := func(search, rawWhere string) []map[string]any {
+		t.Helper()
+		value, distinctErr := s.handle(Request{ID: "distinct-" + search, Method: "distinct", Params: raw(t, distinctParams{
+			rowsParams: rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "contacts"}, RawWhere: rawWhere},
+			Column:     "email", Search: search,
+		})})
+		if distinctErr != nil {
+			t.Fatal(distinctErr)
+		}
+		return value.([]map[string]any)
+	}
+	initial := request("", "")
+	if len(initial) != 200 {
+		t.Fatalf("initial distinct count = %d", len(initial))
+	}
+	for _, entry := range initial {
+		if entry["value"] == "kovacikova@skeletonas.sk" {
+			t.Fatal("low-frequency value unexpectedly appeared in the initial limited result")
+		}
+	}
+	searched := request("kovacikova", `email LIKE '%skeletonas.sk'`)
+	if len(searched) != 1 || searched[0]["value"] != "kovacikova@skeletonas.sk" {
+		t.Fatalf("searched distinct values = %#v", searched)
 	}
 }
 

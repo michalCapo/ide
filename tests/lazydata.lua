@@ -14,6 +14,13 @@ local sqlite = vim.system({ "sqlite3", db, [[
   WITH RECURSIVE sequence(id) AS (
     SELECT 1 UNION ALL SELECT id + 1 FROM sequence WHERE id < 35
   ) INSERT INTO z_paged(id, value) SELECT id, printf('row-%02d', id) FROM sequence;
+  CREATE TABLE zz_distinct_search (id INTEGER PRIMARY KEY, value TEXT);
+  WITH RECURSIVE sequence(id) AS (
+    SELECT 1 UNION ALL SELECT id + 1 FROM sequence WHERE id < 200
+  ) INSERT INTO zz_distinct_search(value)
+    SELECT printf('common-%03d@skeletonas.sk', id) FROM sequence
+    UNION ALL SELECT printf('common-%03d@skeletonas.sk', id) FROM sequence;
+  INSERT INTO zz_distinct_search(value) VALUES ('kovacikova@skeletonas.sk'), ('kovacikova@other.sk');
 ]] }, { text = true }):wait()
 assert(sqlite.code == 0, sqlite.stderr)
 
@@ -182,7 +189,7 @@ vim.api.nvim_feedkeys("\r", "x", false)
 assert(vim.wait(500, function() return picked == "beta" and state.picker == nil end, 10), "database picker did not filter and select with Vim keys")
 
 vim.api.nvim_feedkeys("\r", "x", false)
-assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 3 end, 20), "table list did not load")
+assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 4 end, 20), "table list did not load")
 assert(state.tables[1].name == "people")
 state.table_filter = "people"
 vim.api.nvim_feedkeys("/\r", "x", false)
@@ -362,7 +369,7 @@ assert(state.screen == "profiles", "b did not navigate back from tables to conne
 assert(vim.api.nvim_win_get_buf(state.main.win) == state.main.buf, "connections screen kept the table buffer")
 assert(vim.wait(3000, function() return #state.profiles == 1 end, 20), "profiles did not reload")
 vim.api.nvim_feedkeys("\r", "x", false)
-assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 3 end, 20), "reconnect after back navigation failed")
+assert(vim.wait(3000, function() return state.screen == "workspace" and #state.tables == 4 end, 20), "reconnect after back navigation failed")
 
 vim.api.nvim_feedkeys(string.char(5), "x", false)
 assert(vim.wait(1000, function() return #state.workspaces == 3 end, 20), "query tab did not open")
@@ -476,6 +483,24 @@ assert(vim.wait(3000, function()
 end, 20), "]] did not load the next 30-row page")
 assert(not paged_item.loading_rows, "table loading state remained after rows loaded")
 assert(not vim.wo[state.main.win].statusline:find("executing query", 1, true), "table loader remained visible after rows loaded")
+
+vim.api.nvim_feedkeys("\t", "x", false)
+state.table_index = 4
+vim.api.nvim_feedkeys("\r", "x", false)
+assert(vim.wait(3000, function()
+  local item = state.workspaces[state.workspace_index]
+  return item and item.table == "zz_distinct_search" and item.data and #item.data.rows == 30
+end, 20), "distinct-search test table did not load")
+state.workspaces[state.workspace_index].raw_where = "value LIKE '%skeletonas.sk'"
+vim.api.nvim_feedkeys("l", "x", false)
+vim.api.nvim_feedkeys("u", "x", false)
+assert(vim.wait(3000, function() return state.picker and state.picker.title == "Filter value" end, 20), "large distinct-value picker did not open")
+state.picker.set_filter("kovacikova")
+assert(vim.wait(3000, function()
+  local picker = state.picker
+  return picker and #picker.filtered == 1 and picker.filtered[1].item.value == "kovacikova@skeletonas.sk"
+end, 20), "server-side distinct search did not find a value outside the initial 200 choices")
+vim.api.nvim_feedkeys("\27", "x", false)
 
 assert(state.job and state.job > 0, "backend process is not running")
 print("lazydata end-to-end tests: ok")
