@@ -27,7 +27,7 @@ end
 
 vim.cmd("Explore " .. vim.fn.fnameescape(root))
 wait_for(function()
-  return vim.bo.filetype == "netrw" and vim.fn.maparg("l", "n", false, true).desc == "Expand directory or open file"
+  return vim.bo.filetype == "netrw" and vim.fn.maparg("l", "n", false, true).desc == "Expand directory"
 end, "file explorer mappings were not installed")
 
 local src_row = assert(find_line("| src/"), "src directory was not listed")
@@ -44,6 +44,16 @@ local api_row = assert(find_line("| | api/"), "nested api directory was not list
 vim.api.nvim_win_set_cursor(0, { api_row, 0 })
 press("l")
 wait_for(function() return find_line("| | | init.lua") ~= nil end, "l did not expand a nested directory")
+
+local file_row = assert(find_line("| | | init.lua"), "nested file was not listed")
+vim.api.nvim_win_set_cursor(0, { file_row, 0 })
+local file_lines = #lines()
+press("l")
+vim.wait(50)
+assert(vim.bo.filetype == "netrw" and #lines() == file_lines, "l opened a file")
+
+api_row = assert(find_line("| | api/"), "api directory disappeared after l on a file")
+vim.api.nvim_win_set_cursor(0, { api_row, 0 })
 press("h")
 wait_for(function() return find_line("| | | init.lua") == nil end, "h did not collapse a nested directory")
 

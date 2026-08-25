@@ -2361,17 +2361,21 @@ local function netrw_selected_directory_is_expanded()
   return tree[path] ~= nil
 end
 
+local function netrw_toggle_selected_directory()
+  local keys = vim.api.nvim_replace_termcodes("<Plug>NetrwLocalBrowseCheck", true, false, true)
+  vim.api.nvim_feedkeys(keys, "mx", false)
+end
+
 local function netrw_collapse_selected_directory()
   if netrw_selected_directory_is_expanded() then
-    local keys = vim.api.nvim_replace_termcodes("<Plug>NetrwLocalBrowseCheck", true, false, true)
-    vim.api.nvim_feedkeys(keys, "mx", false)
+    netrw_toggle_selected_directory()
   end
 end
 
-local function netrw_expand_selected_directory_or_open_file()
+local function netrw_expand_selected_directory()
   local expanded = netrw_selected_directory_is_expanded()
-  if expanded ~= true then
-    netrw_open_in_main_and_close_sidebar()
+  if expanded == false then
+    netrw_toggle_selected_directory()
   end
 end
 
@@ -2497,9 +2501,9 @@ vim.api.nvim_create_autocmd("FileType", {
       desc = "Collapse directory",
       silent = true,
     })
-    vim.keymap.set("n", "l", netrw_expand_selected_directory_or_open_file, {
+    vim.keymap.set("n", "l", netrw_expand_selected_directory, {
       buffer = event.buf,
-      desc = "Expand directory or open file",
+      desc = "Expand directory",
       silent = true,
     })
     vim.keymap.set("n", "<BS>", "-", {
