@@ -2305,6 +2305,76 @@ local function netrw_open_in_main_and_close_sidebar()
   end)
 end
 
+local function netrw_tree_line(line)
+  local depth = 0
+  while line:sub(1, 2) == "| " do
+    depth = depth + 1
+    line = line:sub(3)
+  end
+  while line:sub(1, #"│ ") == "│ " do
+    depth = depth + 1
+    line = line:sub(#"│ " + 1)
+  end
+  return depth, line
+end
+
+local function netrw_selected_directory_path()
+  if vim.w.netrw_liststyle ~= 3 then
+    return nil
+  end
+
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local depth, name = netrw_tree_line(vim.api.nvim_get_current_line())
+  if depth == 0 or name == "../" or name:sub(-1) ~= "/" then
+    return nil
+  end
+
+  local segments = { name:sub(1, -2) }
+  local parent_depth = depth - 1
+  for line_number = row - 1, 1, -1 do
+    if parent_depth == 0 then
+      break
+    end
+    local candidate_depth, candidate = netrw_tree_line(vim.fn.getline(line_number))
+    if candidate_depth == parent_depth and candidate:sub(-1) == "/" then
+      table.insert(segments, 1, candidate:sub(1, -2))
+      parent_depth = parent_depth - 1
+    end
+  end
+  if parent_depth ~= 0 then
+    return nil
+  end
+
+  local treetop = vim.w.netrw_treetop or vim.b.netrw_curdir
+  if type(treetop) ~= "string" or treetop == "" then
+    return nil
+  end
+  return vim.fs.normalize(vim.fs.joinpath(treetop, unpack(segments)))
+end
+
+local function netrw_selected_directory_is_expanded()
+  local path = netrw_selected_directory_path()
+  local tree = vim.w.netrw_treedict
+  if not path or type(tree) ~= "table" then
+    return nil
+  end
+  return tree[path] ~= nil
+end
+
+local function netrw_collapse_selected_directory()
+  if netrw_selected_directory_is_expanded() then
+    local keys = vim.api.nvim_replace_termcodes("<Plug>NetrwLocalBrowseCheck", true, false, true)
+    vim.api.nvim_feedkeys(keys, "mx", false)
+  end
+end
+
+local function netrw_expand_selected_directory_or_open_file()
+  local expanded = netrw_selected_directory_is_expanded()
+  if expanded ~= true then
+    netrw_open_in_main_and_close_sidebar()
+  end
+end
+
 function _G.nvim_netrw_create_file_in_main_and_close_sidebar()
   local sidebar_win = vim.api.nvim_get_current_win()
   local dir = vim.b.netrw_curdir or vim.fn.getcwd()
@@ -2422,15 +2492,20 @@ vim.api.nvim_create_autocmd("FileType", {
       desc = "Open file in main window and close explorer",
       silent = true,
     })
-    vim.keymap.set("n", "h", "-", {
+    vim.keymap.set("n", "h", netrw_collapse_selected_directory, {
+      buffer = event.buf,
+      desc = "Collapse directory",
+      silent = true,
+    })
+    vim.keymap.set("n", "l", netrw_expand_selected_directory_or_open_file, {
+      buffer = event.buf,
+      desc = "Expand directory or open file",
+      silent = true,
+    })
+    vim.keymap.set("n", "<BS>", "-", {
       buffer = event.buf,
       desc = "Go to parent directory",
       remap = true,
-      silent = true,
-    })
-    vim.keymap.set("n", "l", netrw_open_in_main_and_close_sidebar, {
-      buffer = event.buf,
-      desc = "Open file or directory",
       silent = true,
     })
     vim.keymap.set("n", "<esc>", _G.nvim_hide_file_explorer_and_focus_file_buffer, {
@@ -2768,9 +2843,10 @@ _G.nvim_keymap_search_groups = {
   {
     section = "File explorer controls",
     items = {
-      { "<Enter>", "Open file / enter directory" },
+      { "<Enter>", "Open file / toggle directory" },
+      { "h / l", "Collapse / expand directory" },
       { "o", "Open with system default application" },
-      { "-", "Go up directory" },
+      { "<Backspace> / -", "Go up directory" },
       { "c", "Set current directory" },
       { "%", "Create file" },
       { "d", "Delete file/directory, asking first" },
