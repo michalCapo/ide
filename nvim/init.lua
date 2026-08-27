@@ -2366,8 +2366,34 @@ local function netrw_toggle_selected_directory()
   vim.api.nvim_feedkeys(keys, "mx", false)
 end
 
+local function netrw_selected_file_parent_row()
+  if vim.w.netrw_liststyle ~= 3 then
+    return nil
+  end
+
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local depth, name = netrw_tree_line(vim.api.nvim_get_current_line())
+  if depth < 2 or name == "../" or name:sub(-1) == "/" then
+    return nil
+  end
+
+  for line_number = row - 1, 1, -1 do
+    local candidate_depth, candidate = netrw_tree_line(vim.fn.getline(line_number))
+    if candidate_depth == depth - 1 and candidate:sub(-1) == "/" then
+      return line_number
+    end
+  end
+end
+
 local function netrw_collapse_selected_directory()
   if netrw_selected_directory_is_expanded() then
+    netrw_toggle_selected_directory()
+    return
+  end
+
+  local parent_row = netrw_selected_file_parent_row()
+  if parent_row then
+    vim.api.nvim_win_set_cursor(0, { parent_row, 0 })
     netrw_toggle_selected_directory()
   end
 end

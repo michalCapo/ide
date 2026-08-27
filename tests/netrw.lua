@@ -52,7 +52,16 @@ press("l")
 vim.wait(50)
 assert(vim.bo.filetype == "netrw" and #lines() == file_lines, "l opened a file")
 
+press("h")
+wait_for(function() return find_line("| | | init.lua") == nil end, "h on a file did not collapse its parent directory")
+assert(vim.api.nvim_get_current_line() == "| | api/", "h on a file did not select its collapsed parent directory")
+
 api_row = assert(find_line("| | api/"), "api directory disappeared after l on a file")
+vim.api.nvim_win_set_cursor(0, { api_row, 0 })
+press("l")
+wait_for(function() return find_line("| | | init.lua") ~= nil end, "l did not re-expand the nested directory")
+
+api_row = assert(find_line("| | api/"), "api directory disappeared after re-expanding it")
 vim.api.nvim_win_set_cursor(0, { api_row, 0 })
 press("h")
 wait_for(function() return find_line("| | | init.lua") == nil end, "h did not collapse a nested directory")
