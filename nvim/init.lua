@@ -345,7 +345,11 @@ vim.o.guicursor = table.concat({
   "sm:block-Cursor/lCursor-blinkwait0-blinkon0-blinkoff0",
 }, ",")
 vim.o.mouse = "a"
-vim.opt.clipboard = "unnamedplus"
+-- Keep Neovim's unnamed register local. With unnamedplus enabled, Neovim can
+-- republish cached text through wl-copy when it regains focus, replacing an
+-- image that another application placed on the Wayland clipboard. Clipboard
+-- mappings below preserve normal user-initiated yank and paste behavior.
+vim.opt.clipboard = ""
 vim.o.ignorecase = true
 vim.o.smartcase = true
 vim.o.splitright = true
@@ -1674,10 +1678,17 @@ end, { desc = "Toggle comment current line" })
 local function paste_register_prefix()
   local register = vim.v.register
   if register == '"' then
-    return ""
+    return '"+'
   end
   return '"' .. register
 end
+
+-- Copy only deliberate yanks to the system clipboard. Deletes, changes, and
+-- internal register operations remain local and cannot replace screenshots.
+vim.keymap.set({ "n", "x" }, "y", '"+y', { desc = "Yank to system clipboard" })
+vim.keymap.set("n", "Y", '"+Y', { desc = "Yank line to system clipboard" })
+vim.keymap.set("n", "p", '"+p', { desc = "Paste from system clipboard" })
+vim.keymap.set("n", "P", '"+P', { desc = "Paste before from system clipboard" })
 
 vim.keymap.set("x", "p", function()
   return '"_d' .. paste_register_prefix() .. "P"
