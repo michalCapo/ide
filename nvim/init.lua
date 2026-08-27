@@ -1683,10 +1683,14 @@ local function paste_register_prefix()
   return '"' .. register
 end
 
--- Copy only deliberate yanks to the system clipboard. Deletes, changes, and
--- internal register operations remain local and cannot replace screenshots.
+-- Copy only deliberate yanks and `dy` deletes to the system clipboard. Other
+-- deletes, changes, and internal register operations remain local.
 vim.keymap.set({ "n", "x" }, "y", '"+y', { desc = "Yank to system clipboard" })
 vim.keymap.set("n", "Y", '"+Y', { desc = "Yank line to system clipboard" })
+vim.keymap.set("n", "dy", '"+dd', { desc = "Delete line to system clipboard" })
+vim.keymap.set("x", "d", "<Nop>", { desc = "Delete prefix" })
+vim.keymap.set("x", "dd", "d", { desc = "Delete selection" })
+vim.keymap.set("x", "dy", '"+d', { desc = "Delete selection to system clipboard" })
 vim.keymap.set("n", "p", '"+p', { desc = "Paste from system clipboard" })
 vim.keymap.set("n", "P", '"+P', { desc = "Paste before from system clipboard" })
 
