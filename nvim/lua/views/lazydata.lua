@@ -1002,7 +1002,7 @@ local function begin_form_edit(form)
   local field=form.fields[form.index];if not field or(field.type~="text"and field.type~="password")then return end
   form.editing=true;form.edit_original=form.values[field.key]or"";form.values[field.key]=(tostring(form.edit_original):gsub("[\r\n]"," "));form.edit_prefix=string.format("  %-19s ",field.label)
   vim.bo[form.buf].modifiable=true;vim.api.nvim_buf_set_lines(form.buf,field.row-1,field.row,false,{form.edit_prefix..form.values[field.key]});vim.bo[form.buf].modified=false
-  vim.api.nvim_win_set_cursor(form.win,{field.row,#form.edit_prefix+#form.values[field.key]});mask_form_password(form,field);vim.cmd.startinsert()
+  vim.api.nvim_win_set_cursor(form.win,{field.row,#form.edit_prefix+#form.values[field.key]});mask_form_password(form,field);vim.cmd("startinsert!")
 end
 
 commit_form_edit = function(form,cancel)

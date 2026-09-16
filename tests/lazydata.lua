@@ -142,6 +142,20 @@ assert(vim.wait(3000, function() return state.form and state.form.status_kind ==
 vim.api.nvim_feedkeys("\27", "x", false)
 assert(state.form == nil, "connection dialog did not close")
 
+vim.api.nvim_feedkeys("n", "x", false)
+local form = assert(state.form, "new connection dialog did not open")
+for _, entry in ipairs({ { "name", "repodata" }, { "user", "tester" }, { "password", "dummy-pass" } }) do
+  while form.fields[form.index].key ~= entry[1] do vim.api.nvim_feedkeys("j", "x", false) end
+  vim.api.nvim_feedkeys("\r" .. entry[2] .. "\r", "x", false)
+  assert(form.values[entry[1]] == entry[2], "empty " .. entry[1] .. " field discarded typed input")
+  local line = vim.api.nvim_buf_get_lines(form.buf, form.fields[form.index].row - 1, form.fields[form.index].row, false)[1]
+  local display = entry[1] == "password" and string.rep("•", #entry[2]) or entry[2]
+  assert(line:sub(-#display) == display, entry[1] .. " field did not display its value")
+end
+vim.api.nvim_feedkeys("\r!\r", "x", false)
+assert(form.values.password == "dummy-pass!", "editing an existing value did not append at the end")
+vim.api.nvim_feedkeys("\27", "x", false)
+
 local picked
 lazydata._open_picker("Switch database", { "alpha", "beta", "gamma" }, tostring, function(value) picked = value end)
 assert(state.picker and vim.api.nvim_win_is_valid(state.picker.win), "database picker did not open")
