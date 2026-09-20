@@ -1,6 +1,6 @@
 # nvim-dap
 
 Vendored from [mfussenegger/nvim-dap](https://codeberg.org/mfussenegger/nvim-dap)
-at commit `9e848e09a697ee95302a3ef2dd43fd6eb709e570`.
+at commit `cfa2d58f4537aca6ca83e2de1a0d9f1491121264`.
 
 The upstream license is included as `LICENSE.txt`.

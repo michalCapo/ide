@@ -444,7 +444,7 @@ local function jump_to_location(bufnr, line, column, switchbuf, filetype)
       set_cursor(cur_win, line, column)
     else
       local win = vim.fn.win_getid(vim.fn.winnr('#'))
-      if win then
+      if win and not vim.wo[win].winfixbuf then
         api.nvim_win_set_buf(win, bufnr)
         set_cursor(win, line, column)
       end
@@ -1882,6 +1882,8 @@ end
 ---@overload fun(self: dap.Session, command: "variables", arguments: dap.VariablesArguments, on_result: fun(err: dap.ErrorResponse?, result: dap.VariableResponse?)?):(dap.ErrorResponse?, dap.VariableResponse?)
 ---@overload fun(self: dap.Session, command: "threads", arguments: nil, on_result: fun(err: dap.ErrorResponse?, result: dap.ThreadResponse?)?):(dap.ErrorResponse?, dap.ThreadResponse?)
 ---@overload fun(self: dap.Session, command: "stackTrace", arguments: dap.StackTraceArguments, on_result: fun(err: dap.ErrorResponse?, result: dap.StackTraceResponse?)?):(dap.ErrorResponse?, dap.StackTraceResponse?)
+---@overload fun(self: dap.Session, command: "setExpression", arguments: dap.SetExpressionArguments, on_result: fun(err: dap.ErrorResponse?, result: dap.SetExpressionResponse?)?):(dap.ErrorResponse?, dap.SetExpressionResponse?)
+---@overload fun(self: dap.Session, command: "setVariable", arguments: dap.SetVariableArguments, on_result: fun(err: dap.ErrorResponse?, result: dap.SetVariableResponse?)?):(dap.ErrorResponse?, dap.SetVariableResponse?)
 function Session:request(command, arguments, on_result)
   local payload = {
     seq = self.seq,

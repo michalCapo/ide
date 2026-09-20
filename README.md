@@ -23,7 +23,7 @@ changed. The launchers unpack their bundled configuration below
 ## Requirements
 
 - Linux (`x86_64` or `arm64`)
-- `make`, `curl`, `tar`, `sha256sum`, Bash, and Go 1.25.7 or newer when building
+- `make`, `curl`, `tar`, `sha256sum`, Bash, and Go 1.27.1 or newer when building
 - x86_64 host when building the Vifm package
 
 The Neovim plugins, themes, Lazygit configuration, and Vifm configuration are
@@ -119,7 +119,7 @@ inside LazyData for the complete key list.
 Build settings can be overridden on the command line:
 
 ```sh
-make build ARCH=arm64 NVIM_VERSION=v0.12.4 LAZYGIT_VERSION=0.63.0
+make build ARCH=arm64 NVIM_VERSION=v0.12.5 LAZYGIT_VERSION=0.65.1
 make build VIFM_VERSION=0.14.4
 make install PREFIX=/custom/prefix
 ```
