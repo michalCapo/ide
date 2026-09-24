@@ -5,7 +5,7 @@ local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "re
   active = 1, collapsed = {}, commit_files = nil, commits_show_changes = false, stash_files = nil, busy = false,
   dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
   watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false,
-  fetch_timer = nil, fetch_request = nil,
+  fetch_timer = nil, fetch_request = nil, fetch_callbacks = nil,
   confirm_dialog = nil, message_dialog = nil, prompt_dialog = nil,
   commit_prompt_win = nil, commit_prompt_buf = nil, commit_history = nil, commit_history_index = nil,
   commit_prompt_draft = nil }
@@ -316,6 +316,7 @@ local function stop_watching()
   end
   if S.fetch_request and S.fetch_request.kill then pcall(S.fetch_request.kill, S.fetch_request, 15) end
   S.fetch_request = nil
+  S.fetch_callbacks = nil
 end
 
 local function poll_repository()
@@ -337,6 +338,38 @@ local function poll_repository()
   end)
 end
 
+local function fetch_all(callback)
+  if S.fetch_request then
+    S.fetch_callbacks[#S.fetch_callbacks + 1] = callback
+    return
+  end
+  S.fetch_callbacks = { callback }
+  S.fetch_request = git.git_async(S.root, { "fetch", "--all", "--prune", "--quiet" }, function(ok, _, err)
+    local callbacks = S.fetch_callbacks or {}
+    S.fetch_request, S.fetch_callbacks = nil, nil
+    for _, done in ipairs(callbacks) do done(ok, err) end
+  end, { env = { GIT_TERMINAL_PROMPT = "0", GIT_SSH_COMMAND = "ssh -o BatchMode=yes" } })
+end
+
+local function sync_branches()
+  if S.busy then return end
+  S.busy = true
+  decorate()
+  fetch_all(function(ok, err)
+    S.busy = false
+    if not ok then notify_error("Sync failed:\n" .. err); decorate(); return end
+    M.refresh()
+    local incoming = {}
+    for _, branch in ipairs(panel("locals").items) do
+      if branch.upstream ~= "" and (branch.behind or 0) > 0 then
+        incoming[#incoming + 1] = string.format("%s ← %s  ↓%d", branch.name, branch.upstream, branch.behind)
+      end
+    end
+    notify(#incoming > 0 and table.concat(incoming, "\n") or "All tracked branches are up to date.",
+      vim.log.levels.INFO, #incoming > 0, " Lazyrepo sync ")
+  end)
+end
+
 local function start_watching()
   stop_watching()
   S.watch_state = nil
@@ -347,10 +380,9 @@ local function start_watching()
   S.fetch_timer = vim.uv.new_timer()
   S.fetch_timer:start(0, fetch_interval, vim.schedule_wrap(function()
     if not S.root or S.busy or S.fetch_request then return end
-    S.fetch_request = git.git_async(S.root, { "fetch", "--all", "--prune", "--quiet" }, function(ok)
-      S.fetch_request = nil
+    fetch_all(function(ok)
       if ok and S.root then M.refresh() end
-    end, { env = { GIT_TERMINAL_PROMPT = "0", GIT_SSH_COMMAND = "ssh -o BatchMode=yes" } })
+    end)
   end))
 end
 
@@ -1077,7 +1109,7 @@ local function help()
     { "Space", "apply" }, { "gp", "pop" }, { "d", "drop" },
   })
   group("Repository", {
-    { "c", "commit" }, { "s", "stash" }, { "p/P", "pull/push" }, { "R", "refresh" },
+    { "c", "commit" }, { "s", "stash" }, { "p/P", "pull/push" }, { "S", "sync remote branches" }, { "R", "refresh" },
     { "]c/]s/]a", "continue/skip/abort conflict" }, { "q", "quit" },
   })
   table.remove(lines)
@@ -1142,7 +1174,7 @@ local function configure(buf)
   map(buf, "e", edit_file); map(buf, "i", ignore_selection)
   map(buf, "c", commit); map(buf, "s", stash); map(buf, "M", function() branch_op("merge") end); map(buf, "r", function() branch_op("rebase") end)
   map(buf, "gp", function() if S.order[S.active] == "stashes" then stash_op("pop") end end)
-  map(buf, "p", function() run({ "pull" }, "Pull", true) end); map(buf, "P", push); map(buf, "R", M.refresh)
+  map(buf, "p", function() run({ "pull" }, "Pull", true) end); map(buf, "P", push); map(buf, "S", sync_branches); map(buf, "R", M.refresh)
   map(buf, "?", help); map(buf, "<Esc>", back); map(buf, "q", "<cmd>qa!<cr>")
   map(buf, "]c", function() conflict_action("continue") end); map(buf, "]s", function() conflict_action("skip") end); map(buf, "]a", function() conflict_action("abort") end)
 end
