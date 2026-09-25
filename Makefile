@@ -11,6 +11,7 @@ DOWNLOAD_DIR := .cache
 RELEASE_DIR := $(DIST_DIR)/release
 
 NVIM_NAME := nvim
+NVIMA_NAME := nvima
 LAZYDIFF_NAME := lazydiff
 LAZYREPO_NAME := lazyrepo
 LAZYDATA_NAME := lazydata
@@ -18,6 +19,7 @@ LAZYDATA_SQL_NAME := lazydata-sql
 LAZYGIT_NAME := lazygit
 VIFM_NAME := vifm
 NVIM_OUTPUT := $(DIST_DIR)/$(NVIM_NAME)
+NVIMA_OUTPUT := $(DIST_DIR)/$(NVIMA_NAME)
 LAZYDIFF_OUTPUT := $(DIST_DIR)/$(LAZYDIFF_NAME)
 LAZYREPO_OUTPUT := $(DIST_DIR)/$(LAZYREPO_NAME)
 LAZYDATA_OUTPUT := $(DIST_DIR)/$(LAZYDATA_NAME)
@@ -26,6 +28,7 @@ LAZYGIT_OUTPUT := $(DIST_DIR)/$(LAZYGIT_NAME)
 VIFM_OUTPUT := $(DIST_DIR)/$(VIFM_NAME)
 
 NVIM_SOURCE_DIR := nvim
+NVIMA_SOURCE_DIR := nvima
 LAZYGIT_SOURCE_DIR := lazygit
 VIFM_SOURCE_DIR := vifm
 
@@ -56,7 +59,7 @@ all: help
 help:
 	@printf '%s\n' \
 	  'Available commands:' \
-	  '  make build    Build portable nvim, LazyData, git tools, and vifm on x86_64' \
+	  '  make build    Build portable nvim, nvima, LazyData, git tools, and vifm on x86_64' \
 	  '  make update   Refresh cached downloads for the selected architecture' \
 	  '  make install  Build and install commands under ~/.local/bin' \
 	  '  make publish  Build and publish the next GitHub release' \
@@ -124,6 +127,8 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	test -d "$(NVIM_SOURCE_DIR)/vscode-theme" || { echo 'Bundled theme is missing' >&2; exit 1; }
 	test -d "$(NVIM_SOURCE_DIR)/nvim-dap" || { echo 'Bundled nvim-dap is missing' >&2; exit 1; }
 	test -d "$(NVIM_SOURCE_DIR)/supermaven-nvim" || { echo 'Bundled supermaven-nvim is missing' >&2; exit 1; }
+	test -f "$(NVIMA_SOURCE_DIR)/init.lua" || { echo 'nvima init.lua is missing' >&2; exit 1; }
+	test -f "$(NVIMA_SOURCE_DIR)/launcher.sh" || { echo 'nvima launcher is missing' >&2; exit 1; }
 	test -f "$(LAZYGIT_SOURCE_DIR)/config.yml" || { echo 'Lazygit config is missing' >&2; exit 1; }
 	test -x "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" || { echo 'Lazygit edit helper is missing or not executable' >&2; exit 1; }
 	WORK=$$(mktemp -d)
@@ -148,6 +153,25 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	cat "$$STUB" "$$WORK/nvim-payload.tar.gz" >"$(NVIM_OUTPUT)"
 	chmod 755 "$(NVIM_OUTPUT)"
 	echo "Built $(NVIM_OUTPUT) ($$(du -h "$(NVIM_OUTPUT)" | cut -f1))"
+
+	NVIMA_MK=$$WORK/nvima-payload
+	mkdir -p "$$NVIMA_MK/config/lua/views"
+	cp -R "$$WORK/nvim-payload/nvim" "$$NVIMA_MK/nvim"
+	cp "$(NVIMA_SOURCE_DIR)/init.lua" "$$NVIMA_MK/config/init.lua"
+	cp "$(NVIM_SOURCE_DIR)/lua/views/references.lua" "$$NVIMA_MK/config/lua/views/references.lua"
+	cp "$(NVIM_SOURCE_DIR)/lua/views/search.lua" "$$NVIMA_MK/config/lua/views/search.lua"
+	cp -R "$(NVIM_SOURCE_DIR)/vscode-theme" "$$NVIMA_MK/config/vscode-theme"
+	NVIMA_CONFIG_HASH=$$(cd "$$NVIMA_MK/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+	NVIMA_PAYLOAD_ID=$$(printf '%s\n' '$(NVIM_VERSION)-$(ARCH)' "$$NVIM_HASH" "$$NVIMA_CONFIG_HASH" | sha256sum | cut -c1-16)
+	NVIMA_STUB="$$WORK/nvima-stub"
+	cp "$(NVIMA_SOURCE_DIR)/launcher.sh" "$$NVIMA_STUB"
+	sed -i "s/@PAYLOAD_ID@/$$NVIMA_PAYLOAD_ID/" "$$NVIMA_STUB"
+	NVIMA_ARCHIVE_LINE=$$(( $$(wc -l <"$$NVIMA_STUB") + 1 ))
+	sed -i "s/@ARCHIVE_LINE@/$$NVIMA_ARCHIVE_LINE/" "$$NVIMA_STUB"
+	tar -czf "$$WORK/nvima-payload.tar.gz" -C "$$WORK" nvima-payload
+	cat "$$NVIMA_STUB" "$$WORK/nvima-payload.tar.gz" >"$(NVIMA_OUTPUT)"
+	chmod 755 "$(NVIMA_OUTPUT)"
+	echo "Built $(NVIMA_OUTPUT) ($$(du -h "$(NVIMA_OUTPUT)" | cut -f1))"
 
 	mkdir -p "$$WORK/lazygit-payload/config" "$$WORK/lazygit-unpacked"
 	tar -xzf "$(LAZYGIT_ARCHIVE)" -C "$$WORK/lazygit-unpacked"
@@ -211,6 +235,7 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 install: build
 	install -d "$(BINDIR)"
 	install -m 755 "$(NVIM_OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
+	install -m 755 "$(NVIMA_OUTPUT)" "$(BINDIR)/$(NVIMA_NAME)"
 	install -m 755 "$(LAZYDIFF_OUTPUT)" "$(BINDIR)/$(LAZYDIFF_NAME)"
 	install -m 755 "$(LAZYREPO_OUTPUT)" "$(BINDIR)/$(LAZYREPO_NAME)"
 	install -m 755 "$(LAZYDATA_OUTPUT)" "$(BINDIR)/$(LAZYDATA_NAME)"
@@ -219,6 +244,7 @@ install: build
 	install -m 755 "$(LAZYGIT_OUTPUT)" "$(BINDIR)/$(LAZYGIT_NAME)"
 	if [ "$(ARCH)" = x86_64 ]; then install -m 755 "$(VIFM_OUTPUT)" "$(BINDIR)/$(VIFM_NAME)"; fi
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
+	echo "Installed $(BINDIR)/$(NVIMA_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYREPO_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDATA_NAME)"
@@ -236,9 +262,9 @@ release-assets:
 	for ARCH_VALUE in x86_64 arm64; do
 	  $(MAKE) build ARCH="$$ARCH_VALUE"
 	  if [ "$$ARCH_VALUE" = x86_64 ]; then
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYDATA_NAME)" "$(LAZYDATA_SQL_NAME)" "$(LAZYGIT_NAME)" "$(VIFM_NAME)"
+	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(NVIMA_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYDATA_NAME)" "$(LAZYDATA_SQL_NAME)" "$(LAZYGIT_NAME)" "$(VIFM_NAME)"
 	  else
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYDATA_NAME)" "$(LAZYDATA_SQL_NAME)" "$(LAZYGIT_NAME)"
+	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(NVIMA_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYDATA_NAME)" "$(LAZYDATA_SQL_NAME)" "$(LAZYGIT_NAME)"
 	  fi
 	done
 	rm -rf "$(RELEASE_DIR)"
@@ -260,8 +286,8 @@ release-assets:
 	done
 	[ "$$(uname -s)" = Linux ] || fail "unsupported operating system: $$(uname -s)"
 	case $$(uname -m) in
-	  x86_64|amd64) arch=x86_64; commands='nvim lazydiff lazyrepo lazydata lazydata-sql lazygit vifm' ;;
-	  aarch64|arm64) arch=arm64; commands='nvim lazydiff lazyrepo lazydata lazydata-sql lazygit' ;;
+	  x86_64|amd64) arch=x86_64; commands='nvim nvima lazydiff lazyrepo lazydata lazydata-sql lazygit vifm' ;;
+	  aarch64|arm64) arch=arm64; commands='nvim nvima lazydiff lazyrepo lazydata lazydata-sql lazygit' ;;
 	  *) fail "unsupported Linux architecture: $$(uname -m)" ;;
 	esac
 	asset="nvim-linux-$$arch.tar.gz"

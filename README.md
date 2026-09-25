@@ -9,6 +9,7 @@ also creates the `lazydata`, `lazydiff`, and `lazyrepo` companion commands.
 | Command | x86_64 | arm64 |
 | --- | --- | --- |
 | `nvim` | yes | yes |
+| `nvima` | yes | yes |
 | `lazydiff` | yes | yes |
 | `lazyrepo` | yes | yes |
 | `lazydata` | yes | yes |
@@ -19,6 +20,11 @@ Vifm is omitted on ARM64 because upstream does not publish an ARM64 Linux
 binary. Existing `~/.config/lazygit` and `~/.config/vifm` directories are not
 changed. The launchers unpack their bundled configuration below
 `${XDG_CACHE_HOME:-~/.cache}`.
+
+`nvima` is a slimmer build of the same editor. It keeps file management, LSP,
+completion, editing/navigation, and UI/shell features, and leaves out the AI
+agents, Git tools, database viewer, debugger, and run configurations. It builds
+its own payload and installs beside `nvim`, so both commands stay available.
 
 ## Requirements
 
@@ -138,6 +144,8 @@ make clean   # remove dist/ but keep cached downloads
 
 - `nvim/` contains the Neovim configuration, bundled plugins, and launcher
   templates.
+- `nvima/` contains the reduced Neovim configuration and launcher used by the
+  `nvima` command.
 - `lazygit/` contains the active Lazygit configuration and parent-editor helper.
 - `vifm/` contains the Vifm configuration, colors, and scripts.
 - The root `Makefile` builds all portable commands and release assets.
