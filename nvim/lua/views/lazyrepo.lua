@@ -420,15 +420,16 @@ local function jump(to_bottom)
   end
 end
 
-local function run(args, label, async, opts)
+local function run(args, label, async, opts, on_success)
   if S.busy then return end
   S.busy = true
   for _, name in ipairs(S.order) do render(name) end
-  local done = function(ok, _, err)
+  local done = function(ok, out, err)
     S.busy = false
     if not ok then notify_error((label or "Git operation") .. " failed:\n" .. err) end
     M.refresh()
     S.watch_pending = false
+    if ok and on_success then on_success(out) end
   end
   if async then git.git_async(S.root, args, done) else
     local out, err = git.git(S.root, args, opts); done(out ~= nil, out or "", err or "")
@@ -988,7 +989,25 @@ end
 local function branch_op(kind)
   local item = selected(); if not item or not item.name then return end
   local action = function()
-    run(kind == "merge" and { "merge", item.name } or { "rebase", item.name }, kind, true)
+    if kind == "merge" then
+      local current
+      for _, branch in ipairs(panel("locals").items) do
+        if branch.current then current = branch.name; break end
+      end
+      run({ "merge", "--no-edit", item.name }, "Merge", true, nil, function(out)
+        local result = vim.trim(out)
+        local message = "Merge " .. item.name .. " into " .. (current or "current branch") .. ":\n"
+          .. (result ~= "" and result or "Completed.")
+        if result:find("Already up to date", 1, true) and (item.behind or 0) > 0 then
+          message = message .. "\n" .. item.name .. " is " .. item.behind
+            .. (item.behind == 1 and " commit" or " commits") .. " behind "
+            .. item.upstream .. ". Select " .. item.upstream .. " under Remote branches and press M to merge those changes."
+        end
+        notify(message)
+      end)
+    else
+      run({ "rebase", item.name }, kind, true)
+    end
   end
   if kind == "rebase" then
     confirm("Rebase the current branch onto " .. item.name .. "? This rewrites local history.", action)
