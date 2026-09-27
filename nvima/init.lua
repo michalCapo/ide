@@ -1041,7 +1041,8 @@ local function render_landing_page(buf)
 end
 
 local function show_landing_page()
-  if vim.fn.argc() ~= 0 or vim.fn.line("$") ~= 1 or vim.fn.getline(1) ~= "" then
+  if vim.fn.argc() ~= 0 or vim.api.nvim_buf_get_name(0) ~= ""
+      or vim.fn.line("$") ~= 1 or vim.fn.getline(1) ~= "" then
     return
   end
 
@@ -2450,6 +2451,23 @@ local function fuzzy_files()
 end
 
 vim.keymap.set("n", "<leader><leader>", fuzzy_files, { desc = "Fuzzy find files" })
+
+vim.api.nvim_create_autocmd("VimEnter", {
+  once = true,
+  callback = function()
+    if vim.fn.argc() ~= 0 then
+      return
+    end
+    vim.schedule(function()
+      for _, buf in ipairs(listed_buffers()) do
+        if vim.bo[buf].buftype == "" and vim.api.nvim_buf_get_name(buf) ~= "" then
+          return
+        end
+      end
+      fuzzy_files()
+    end)
+  end,
+})
 
 local function fuzzy_buffers()
   local buffers = {}
