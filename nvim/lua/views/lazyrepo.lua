@@ -958,6 +958,15 @@ local function enter()
   end
 end
 
+local function open_file()
+  if S.order[S.active] ~= "files" then return end
+  local item = selected("files")
+  if not item or item.placeholder or item.kind == "folder" or not item.path then return end
+
+  local ok, result, err = pcall(vim.ui.open, S.root .. "/" .. item.path)
+  if not ok then notify_error(result) elseif err then notify_error(err) end
+end
+
 local function edit_file()
   if S.order[S.active] ~= "files" then return end
   local item = selected("files")
@@ -1119,6 +1128,7 @@ local function help()
   })
   group("Files", {
     { "Space", "stage/unstage" }, { "a", "stage/unstage all" }, { "e", "edit in parent" },
+    { "o", "open in default app" },
     { "i", "ignore and untrack" }, { "d", "discard changes" },
   })
   group("Branches", {
@@ -1190,7 +1200,7 @@ local function configure(buf)
     local name = S.order[S.active]
     if name == "files" then discard() elseif name == "stashes" then stash_op("drop") elseif name == "locals" or name == "remotes" then delete_branch() end
   end)
-  map(buf, "e", edit_file); map(buf, "i", ignore_selection)
+  map(buf, "e", edit_file); map(buf, "o", open_file); map(buf, "i", ignore_selection)
   map(buf, "c", commit); map(buf, "s", stash); map(buf, "M", function() branch_op("merge") end); map(buf, "r", function() branch_op("rebase") end)
   map(buf, "gp", function() if S.order[S.active] == "stashes" then stash_op("pop") end end)
   map(buf, "p", function() run({ "pull" }, "Pull", true) end); map(buf, "P", push); map(buf, "S", sync_branches); map(buf, "R", M.refresh)

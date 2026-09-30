@@ -80,6 +80,7 @@ lazyrepo --help
 The dashboard uses Files, Local/Remote/Stash, and Commits columns. In terminals
 narrower than 100 columns it collapses to the active panel; use `h`/`l` or
 `Tab`/`Shift-Tab` to move between panels.
+In Files, press `o` to open the selected file in the OS default application.
 
 Open the database viewer:
 
