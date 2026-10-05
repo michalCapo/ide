@@ -841,7 +841,7 @@ local function commit()
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
   vim.api.nvim_set_option_value("buflisted", false, { buf = buf })
   vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
-  vim.api.nvim_set_option_value("filetype", "gitcommit", { buf = buf })
+  vim.api.nvim_set_option_value("filetype", "text", { buf = buf })
   vim.wo[win].wrap = true
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
