@@ -1,7 +1,7 @@
 local git = require("views.git")
 local M = {}
 
-local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "remotes", "stashes", "commits" },
+local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "remotes", "stashes", "commits", "commit_files" },
   active = 1, collapsed = {}, commit_files = nil, commits_show_changes = false, stash_files = nil, busy = false,
   dashboard_tab = nil, dashboard_win = nil, content_panel = "files", return_panel = "locals", commits_ref = nil,
   watch_timer = nil, watch_request = nil, watch_state = nil, watch_pending = false,
@@ -158,6 +158,7 @@ local function selected(name)
 end
 
 local function visible_order()
+  if S.commit_files then return { "commits", "commit_files" } end
   if S.content_panel == "commits" then return { "locals", "remotes", "stashes", "commits" } end
   return { "files", "locals", "remotes", "stashes" }
 end
@@ -269,7 +270,6 @@ local function load_commits(ref)
   S.commits_ref = ref or "HEAD"
   local commits, err = git.commits(S.root, S.commits_ref)
   if not commits then notify_error(err); commits = {} end
-  S.commit_files = nil
   S.commits_show_changes = #commits == 0
   if S.commits_show_changes then
     local files, files_err = git.status(S.root)
@@ -296,7 +296,16 @@ function M.refresh()
   preserve(panel("stashes"), stashes or {}, "oid")
   for _, name in ipairs({ "files", "locals", "remotes", "stashes" }) do render(name) end
   local branch = selected("locals")
-  load_commits(branch and branch.name or "HEAD")
+  load_commits(S.content_panel == "commits" and S.commits_ref or branch and branch.name or "HEAD")
+  if S.commit_files then
+    local paths, err = git.changed_paths(S.root, S.commit_files.oid)
+    if paths then
+      preserve(panel("commit_files"), git.tree(paths, S.collapsed), "path")
+      render("commit_files")
+    else
+      notify_error(err)
+    end
+  end
   for _, err in ipairs(errors) do if err then notify_error(err); break end end
 end
 
@@ -919,7 +928,7 @@ local function enter()
   if item.kind == "folder" then
     S.collapsed[item.path] = not S.collapsed[item.path]
     local files, err
-    if name == "commits" and S.commit_files then
+    if name == "commit_files" then
       files, err = git.changed_paths(S.root, S.commit_files.oid)
     elseif name == "stashes" and S.stash_files then
       files, err = git.changed_paths(S.root, S.stash_files.ref)
@@ -942,12 +951,18 @@ local function enter()
   elseif name == "commits" then
     if S.commits_show_changes then
       open_diff(item.path)
-    elseif S.commit_files then open_diff(item.path, S.commit_files.oid) else
+    else
       local files, err = git.changed_paths(S.root, item.oid)
       if not files then notify_error(err); return end
       S.commit_files = item
-      preserve(panel("commits"), git.tree(files, S.collapsed), "path"); render("commits")
+      panel("commit_files").items = git.tree(files, S.collapsed)
+      panel("commit_files").index = 1
+      render("commit_files")
+      S.active = 6
+      apply_layout(true)
     end
+  elseif name == "commit_files" then
+    open_diff(item.path, S.commit_files.oid)
   elseif name == "stashes" then
     if S.stash_files then open_diff(item.path, S.stash_files.ref) else
       local files, err = git.changed_paths(S.root, item.ref)
@@ -1157,6 +1172,8 @@ local function back()
   if S.commit_files then
     S.commit_files = nil
     load_commits(S.commits_ref)
+    S.active = 5
+    apply_layout(true)
     return
   elseif S.stash_files then
     S.stash_files = nil
@@ -1223,17 +1240,17 @@ local function keep_only_current_window()
 end
 
 local function equalize_columns()
-  local content = panel(S.content_panel)
+  local content = panel(S.commit_files and "commit_files" or S.content_panel)
   local locals = panel("locals")
-  if not content or not locals
-      or not content.win or not vim.api.nvim_win_is_valid(content.win)
-      or not vim.api.nvim_win_is_valid(locals.win) then
+  if not content or not content.win or not vim.api.nvim_win_is_valid(content.win) then
     return
   end
 
   local width = math.max(math.floor((vim.o.columns - 1) / 2), vim.o.winminwidth)
   pcall(vim.api.nvim_win_set_width, content.win, width)
 
+  if S.commit_files then return end
+  if not locals or not locals.win or not vim.api.nvim_win_is_valid(locals.win) then return end
   local height = math.max(math.floor((vim.o.lines - vim.o.cmdheight - 3) / 3), vim.o.winminheight)
   pcall(vim.api.nvim_win_set_height, locals.win, height)
   pcall(vim.api.nvim_win_set_height, panel("remotes").win, height)
@@ -1266,19 +1283,24 @@ apply_layout = function(force)
 
   local left = base
   vim.cmd("rightbelow vsplit"); local right = vim.api.nvim_get_current_win()
-  local branches, content
-  if S.content_panel == "commits" then
-    branches, content = left, right
+  if S.commit_files then
+    configure_panel_window("commits", left)
+    configure_panel_window("commit_files", right)
   else
-    content, branches = left, right
+    local branches, content
+    if S.content_panel == "commits" then
+      branches, content = left, right
+    else
+      content, branches = left, right
+    end
+    vim.api.nvim_set_current_win(branches)
+    vim.cmd("rightbelow split"); local remotes = vim.api.nvim_get_current_win()
+    vim.cmd("rightbelow split"); local stashes = vim.api.nvim_get_current_win()
+    configure_panel_window(S.content_panel, content)
+    configure_panel_window("locals", branches)
+    configure_panel_window("remotes", remotes)
+    configure_panel_window("stashes", stashes)
   end
-  vim.api.nvim_set_current_win(branches)
-  vim.cmd("rightbelow split"); local remotes = vim.api.nvim_get_current_win()
-  vim.cmd("rightbelow split"); local stashes = vim.api.nvim_get_current_win()
-  configure_panel_window(S.content_panel, content)
-  configure_panel_window("locals", branches)
-  configure_panel_window("remotes", remotes)
-  configure_panel_window("stashes", stashes)
   S.dashboard_win = left
   equalize_columns()
 
@@ -1314,9 +1336,11 @@ function M.launch()
   create_panel("remotes", "Remote branches", remotes)
   create_panel("stashes", "Stashes", stashes)
   create_panel("commits", "Commits")
+  create_panel("commit_files", "Commit files")
   S.dashboard_tab = vim.api.nvim_get_current_tabpage()
   S.dashboard_win = left
   S.content_panel = "files"
+  S.commit_files = nil
   local layout_group = vim.api.nvim_create_augroup("LazyrepoLayout", { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
     group = layout_group,

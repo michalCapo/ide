@@ -49,7 +49,7 @@ assert(#commit_files == 1 and commit_files[1].path == "one.txt" and commit_files
 vim.fn.delete(test_root, "rf")
 
 local lazyrepo = require("views.lazyrepo")
-assert(vim.deep_equal(lazyrepo._state.order, { "files", "locals", "remotes", "stashes", "commits" }))
+assert(vim.deep_equal(lazyrepo._state.order, { "files", "locals", "remotes", "stashes", "commits", "commit_files" }))
 
 local accepted = false
 lazyrepo._confirm("Ignore and untrack a/very/long/path/to/a/generated/file.db?", function() accepted = true end)
