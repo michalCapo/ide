@@ -47,14 +47,11 @@ end
 local locals = lazyrepo._state.panels.locals
 vim.api.nvim_set_current_win(lazyrepo._state.panels.files.win)
 vim.api.nvim_feedkeys("S", "x", false)
-assert(vim.wait(5000, function() return lazyrepo._state.message_dialog ~= nil end, 20), "sync result did not appear")
-local dialog = lazyrepo._state.message_dialog
-local summary = table.concat(vim.api.nvim_buf_get_lines(dialog.buf, 0, -1, false), "\n")
-assert(summary:find("main ← origin/main  ↓1", 1, true), summary)
-assert(summary:find("other ← origin/other  ↓1", 1, true), summary)
-for _, branch in ipairs(locals.items) do
-  assert(branch.behind == 1, branch.name .. " did not refresh")
-end
+assert(vim.wait(5000, function()
+  for _, branch in ipairs(locals.items) do if branch.behind ~= 1 then return false end end
+  return not lazyrepo._state.busy
+end, 20), "sync did not refresh branches")
+assert(lazyrepo._state.message_dialog == nil, "successful sync must not show a dialog")
 
 vim.fn.delete(root, "rf")
 vim.fn.delete(remote, "rf")

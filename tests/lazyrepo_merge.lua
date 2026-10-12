@@ -42,7 +42,7 @@ vim.api.nvim_set_current_win(locals.win)
 vim.api.nvim_feedkeys("jM", "x", false)
 assert(vim.wait(3000, function() return state.message_dialog ~= nil end, 20), "merge result did not appear")
 local message = table.concat(vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false), "\n")
-assert(message:find("Already up to date", 1, true), message)
+assert(vim.api.nvim_win_get_config(state.message_dialog.win).title[1][1] == " Lazyrepo warning ")
 assert(message:find("Select origin/master under", 1, true) and message:find("press M", 1, true), message)
 assert(git(root, "rev-parse", "test") == git(root, "rev-parse", "master"))
 
@@ -61,11 +61,13 @@ for index, branch in ipairs(remotes.items) do
   end
 end
 vim.api.nvim_feedkeys("M", "x", false)
-assert(vim.wait(3000, function() return state.message_dialog ~= nil end, 20), "remote merge result did not appear")
-message = table.concat(vim.api.nvim_buf_get_lines(state.message_dialog.buf, 0, -1, false), "\n")
-assert(message:find("Merge origin/master into test", 1, true), message)
-local parents = vim.split(git(root, "rev-list", "--parents", "-n", "1", "test"), " ")
-assert(#parents == 3 and parents[3] == git(root, "rev-parse", "origin/master"))
+local parents
+assert(vim.wait(3000, function()
+  parents = vim.split(git(root, "rev-list", "--parents", "-n", "1", "test"), " ")
+  return #parents == 3 and not state.busy
+end, 20), "remote merge did not finish")
+assert(parents[3] == git(root, "rev-parse", "origin/master"))
+assert(state.message_dialog == nil, "successful merge must not show a dialog")
 
 vim.fn.delete(root, "rf")
 vim.fn.delete(remote, "rf")

@@ -368,14 +368,6 @@ local function sync_branches()
     S.busy = false
     if not ok then notify_error("Sync failed:\n" .. err); decorate(); return end
     M.refresh()
-    local incoming = {}
-    for _, branch in ipairs(panel("locals").items) do
-      if branch.upstream ~= "" and (branch.behind or 0) > 0 then
-        incoming[#incoming + 1] = string.format("%s ← %s  ↓%d", branch.name, branch.upstream, branch.behind)
-      end
-    end
-    notify(#incoming > 0 and table.concat(incoming, "\n") or "All tracked branches are up to date.",
-      vim.log.levels.INFO, #incoming > 0, " Lazyrepo sync ")
   end)
 end
 
@@ -1014,20 +1006,13 @@ local function branch_op(kind)
   local item = selected(); if not item or not item.name then return end
   local action = function()
     if kind == "merge" then
-      local current
-      for _, branch in ipairs(panel("locals").items) do
-        if branch.current then current = branch.name; break end
-      end
       run({ "merge", "--no-edit", item.name }, "Merge", true, nil, function(out)
-        local result = vim.trim(out)
-        local message = "Merge " .. item.name .. " into " .. (current or "current branch") .. ":\n"
-          .. (result ~= "" and result or "Completed.")
-        if result:find("Already up to date", 1, true) and (item.behind or 0) > 0 then
-          message = message .. "\n" .. item.name .. " is " .. item.behind
+        if out:find("Already up to date", 1, true) and (item.behind or 0) > 0 then
+          notify(item.name .. " is already merged, but it is " .. item.behind
             .. (item.behind == 1 and " commit" or " commits") .. " behind "
-            .. item.upstream .. ". Select " .. item.upstream .. " under Remote branches and press M to merge those changes."
+            .. item.upstream .. ". Select " .. item.upstream .. " under Remote branches and press M to merge those changes.",
+            vim.log.levels.WARN)
         end
-        notify(message)
       end)
     else
       run({ "rebase", item.name }, kind, true)
