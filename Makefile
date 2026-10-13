@@ -48,11 +48,12 @@ VIFM_SHA256_x86_64 := c8568514e0bf276c2031a381ed7a2c48312deb29c528575060c7cd1da4
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= nvim
+LIBRO_DIR ?= $(CURDIR)/../libro
 NVIM_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
 LAZYGIT_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/lazygit-portable
 VIFM_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/vifm-portable
 
-.PHONY: all help build update install release-assets publish clean
+.PHONY: all help build update install release-assets libro-tools publish clean
 
 all: help
 
@@ -62,7 +63,8 @@ help:
 	  '  make build    Build portable nvim, nvima, LazyData, git tools, and vifm on x86_64' \
 	  '  make update   Refresh cached downloads for the selected architecture' \
 	  '  make install  Build and install commands under ~/.local/bin' \
-	  '  make publish  Build and publish the next GitHub release' \
+	  '  make libro-tools  Build release assets and copy them into the Libro project' \
+	  '  make publish  Build and publish the next GitHub release, and copy it into Libro' \
 	  '  make clean    Remove generated files; keep cached downloads'
 
 $(NVIM_ARCHIVE):
@@ -325,6 +327,14 @@ release-assets:
 	sha256sum nvim-linux-x86_64.tar.gz nvim-linux-arm64.tar.gz >SHA256SUMS
 	echo "Built release assets in $(RELEASE_DIR)/"
 
+# Libro ships these archives inside its own release builds.
+libro-tools: release-assets
+	set -eu
+	[ -d "$(LIBRO_DIR)" ] || { echo "Libro project not found at $(LIBRO_DIR); set LIBRO_DIR" >&2; exit 1; }
+	mkdir -p "$(LIBRO_DIR)/tools"
+	cp "$(RELEASE_DIR)/nvim-linux-x86_64.tar.gz" "$(RELEASE_DIR)/nvim-linux-arm64.tar.gz" "$(RELEASE_DIR)/SHA256SUMS" "$(LIBRO_DIR)/tools/"
+	echo "Copied CLI tools to $(LIBRO_DIR)/tools/"
+
 publish:
 	set -eu
 	command -v gh >/dev/null 2>&1 || { echo 'publish requires the GitHub CLI (gh)' >&2; exit 127; }
@@ -346,7 +356,7 @@ publish:
 	fi
 	gh release view "$$VERSION" >/dev/null 2>&1 && { echo "release already exists: $$VERSION" >&2; exit 1; } || true
 	echo "Publishing $$VERSION from $$LOCAL_HEAD..."
-	$(MAKE) release-assets
+	$(MAKE) libro-tools
 	gh release create "$$VERSION" "$(RELEASE_DIR)/nvim-linux-x86_64.tar.gz" "$(RELEASE_DIR)/nvim-linux-arm64.tar.gz" "$(RELEASE_DIR)/SHA256SUMS" "$(RELEASE_DIR)/install.sh" --target "$$LOCAL_HEAD" --title "$$VERSION" --generate-notes --fail-on-no-commits --latest
 	gh api --paginate 'repos/{owner}/{repo}/releases?per_page=100' --jq '.[].tag_name' | while IFS= read -r OLD_VERSION; do
 	  [ -n "$$OLD_VERSION" ] || continue

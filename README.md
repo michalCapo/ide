@@ -58,6 +58,10 @@ make install
 `make build` writes commands to `dist/`. `make install` installs them to
 `~/.local/bin` by default.
 
+`make publish` also copies the Linux release archives and `SHA256SUMS` into
+`../libro/tools/` (`make libro-tools` does only that step; set `LIBRO_DIR` for
+another checkout). Libro packs them into its Linux builds.
+
 Review changes in the current Git repository, initially focusing a specific
 repository-relative file:
 
