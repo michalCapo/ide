@@ -23,9 +23,6 @@ if [ ! -x "$APP_DIR/nvim/bin/nvim" ]; then
 fi
 
 export NVIM_PORTABLE_INIT="$APP_DIR/config/init.lua"
-if [ -x "$SELF_DIR/lazygit" ]; then
-  export NVIM_PORTABLE_LAZYGIT="$SELF_DIR/lazygit"
-fi
 if [ -x "$SELF_DIR/lazyrepo" ]; then
   export NVIM_PORTABLE_LAZYREPO="$SELF_DIR/lazyrepo"
 fi

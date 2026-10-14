@@ -1993,101 +1993,6 @@ vim.keymap.set({ "n", "t" }, "<Esc>3", _G.nvim_focus_dap_terminal, { desc = "Foc
 -- makes every typed space ambiguous for `timeoutlen` and " dT" triggers it.
 vim.keymap.set({ "n", "t" }, "<leader>dT", _G.nvim_focus_dap_terminal, { desc = "Focus DAP terminal", silent = true })
 
-function _G.open_lazygit()
-  local lazygit = vim.env.NVIM_PORTABLE_LAZYGIT or "lazygit"
-  if vim.fn.executable(lazygit) ~= 1 then
-    vim.notify("lazygit is not installed or not on PATH", vim.log.levels.ERROR)
-    return
-  end
-
-  local function lazygit_float_config()
-    return {
-      relative = "editor",
-      row = 0,
-      col = 0,
-      width = vim.o.columns,
-      height = vim.o.lines - vim.o.cmdheight,
-      border = "none",
-      style = "minimal",
-    }
-  end
-
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "wipe"
-
-  local win = vim.api.nvim_open_win(buf, true, lazygit_float_config())
-  local edit_request = vim.fn.tempname()
-
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
-
-  local resize_autocmd
-  local function resize_lazygit()
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_set_config(win, lazygit_float_config())
-    end
-  end
-
-  resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
-    callback = vim.schedule_wrap(resize_lazygit),
-    desc = "Resize fullscreen lazygit float",
-  })
-
-  local job_id = vim.fn.termopen({ lazygit }, {
-    cwd = vim.fn.getcwd(),
-    env = {
-      LAZYGIT_NVIM_EDIT_REQUEST = edit_request,
-    },
-    on_exit = vim.schedule_wrap(function()
-      local pending_edit
-      if vim.fn.filereadable(edit_request) == 1 then
-        local lines = vim.fn.readfile(edit_request)
-        if lines[1] and lines[1] ~= "" then
-          pending_edit = {
-            file = lines[1],
-            line = math.max(tonumber(lines[2]) or 1, 1),
-            col = math.max(tonumber(lines[3]) or 0, 0),
-          }
-        end
-      end
-      pcall(vim.fn.delete, edit_request)
-
-      if resize_autocmd then
-        pcall(vim.api.nvim_del_autocmd, resize_autocmd)
-      end
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_win_close(win, true)
-      end
-      if pending_edit then
-        vim.cmd.edit(vim.fn.fnameescape(pending_edit.file))
-        local line_count = math.max(vim.api.nvim_buf_line_count(0), 1)
-        local line = math.min(pending_edit.line, line_count)
-        local text = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1] or ""
-        pcall(vim.api.nvim_win_set_cursor, 0, { line, math.min(pending_edit.col, #text) })
-      end
-    end),
-  })
-
-  local function send_lazygit_escape()
-    if job_id and job_id > 0 then
-      vim.api.nvim_chan_send(job_id, "\27")
-    end
-    if vim.api.nvim_get_mode().mode ~= "t" then
-      vim.cmd.startinsert()
-    end
-  end
-
-  vim.keymap.set({ "t", "n" }, "<esc>", send_lazygit_escape, {
-    buffer = buf,
-    desc = "Send Esc to lazygit",
-    nowait = true,
-    silent = true,
-  })
-
-  vim.cmd.startinsert()
-end
-
 function _G.open_lazyrepo()
   local lazyrepo = vim.env.NVIM_PORTABLE_LAZYREPO or "lazyrepo"
   if vim.fn.executable(lazyrepo) ~= 1 then
@@ -2870,7 +2775,6 @@ _G.nvim_keymap_search_groups = {
       { "<leader>f", "Toggle file explorer" },
       { "<leader>gb", "Git blame current line" },
       { "<leader>gg", "Open lazyrepo" },
-      { "<leader>gl", "Open lazygit" },
       { "<leader>gd", "Open lazydata" },
     },
   },
@@ -8177,7 +8081,6 @@ end
 vim.keymap.set("n", "<leader>gb", git_blame_current_line, { desc = "Git blame current line" })
 vim.keymap.set("n", "<leader>gg", _G.open_lazyrepo, { desc = "Open lazyrepo" })
 vim.keymap.set("n", "<leader>gd", _G.open_lazydata, { desc = "Open lazydata" })
-vim.keymap.set("n", "<leader>gl", _G.open_lazygit, { desc = "Open lazygit" })
 vim.keymap.set("n", "<leader>ge", function()
   references_view.project_errors()
 end, { desc = "Project errors" })

@@ -1,24 +1,20 @@
 # Portable terminal tools
 
-Personal Neovim, database, Git, and file-management tools packaged as portable
-Linux commands. The build bundles each executable with its configuration and
-also creates the `lazydata`, `lazydiff`, and `lazyrepo` companion commands.
+Personal Neovim, database, and Git tools packaged as portable Linux commands.
+The build bundles `nvim` and `nvima` with their configuration and also creates
+the `lazydata`, `lazydiff`, and `lazyrepo` companion commands.
 
 ## Included commands
 
-| Command | x86_64 | arm64 |
-| --- | --- | --- |
-| `nvim` | yes | yes |
-| `nvima` | yes | yes |
-| `lazydiff` | yes | yes |
-| `lazyrepo` | yes | yes |
-| `lazydata` | yes | yes |
-| `lazygit` | yes | yes |
-| `vifm` | yes | no |
+Each command is built for both `x86_64` and `arm64`:
 
-Vifm is omitted on ARM64 because upstream does not publish an ARM64 Linux
-binary. Existing `~/.config/lazygit` and `~/.config/vifm` directories are not
-changed. The launchers unpack their bundled configuration below
+- `nvim`
+- `nvima`
+- `lazydiff`
+- `lazyrepo`
+- `lazydata` and its `lazydata-sql` helper
+
+The launchers unpack their bundled configuration below
 `${XDG_CACHE_HOME:-~/.cache}`.
 
 `nvima` is a slimmer build of the same editor. It keeps file management, LSP,
@@ -30,11 +26,9 @@ its own payload and installs beside `nvim`, so both commands stay available.
 
 - Linux (`x86_64` or `arm64`)
 - `make`, `curl`, `tar`, `sha256sum`, Bash, and Go 1.27.1 or newer when building
-- x86_64 host when building the Vifm package
 
-The Neovim plugins, themes, Lazygit configuration, and Vifm configuration are
-included in this repository. Downloaded upstream binaries are checksum-verified
-and retained in `.cache/`.
+The Neovim plugins and themes are included in this repository. The downloaded
+Neovim release is checksum-verified and retained in `.cache/`.
 
 ## Build and install
 
@@ -130,8 +124,7 @@ inside LazyData for the complete key list.
 Build settings can be overridden on the command line:
 
 ```sh
-make build ARCH=arm64 NVIM_VERSION=v0.12.5 LAZYGIT_VERSION=0.65.1
-make build VIFM_VERSION=0.14.4
+make build ARCH=arm64 NVIM_VERSION=v0.12.5
 make install PREFIX=/custom/prefix
 ```
 
@@ -147,16 +140,11 @@ make clean   # remove dist/ but keep cached downloads
 
 ## Source layout
 
-- `nvim/` contains the Neovim configuration, bundled plugins, and launcher
-  templates.
+- `nvim/` contains the Neovim configuration, bundled plugins, shared views, and
+  companion command templates.
 - `nvima/` contains the reduced Neovim configuration and launcher used by the
   `nvima` command.
-- `lazygit/` contains the active Lazygit configuration and parent-editor helper.
-- `vifm/` contains the Vifm configuration, colors, and scripts.
 - The root `Makefile` builds all portable commands and release assets.
-
-Vifm runtime history (`vifminfo`) is intentionally not tracked. A clean state
-file is created in the extracted portable cache.
 
 ## Use as a regular Neovim config
 

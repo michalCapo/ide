@@ -51,8 +51,7 @@ export LAZYDIFF_FILE=$1
 export NVIM_PORTABLE_LAZYDIFF=1
 
 # `e` writes the selected file and cursor position here. Once the lightweight
-# viewer exits, pass that request through Lazygit's editor helper. The helper
-# closes Lazygit, allowing the terminal's parent Neovim to open the file.
+# viewer exits, open that file in the normally configured Neovim.
 EDIT_HANDOFF=$(mktemp "${TMPDIR:-/tmp}/lazydiff-edit.XXXXXX")
 trap 'rm -f "$EDIT_HANDOFF"' EXIT HUP INT TERM
 export LAZYDIFF_EDIT_HANDOFF=$EDIT_HANDOFF
@@ -69,13 +68,6 @@ if [ -s "$EDIT_HANDOFF" ]; then
   case $line in *[!0-9]*) line=1 ;; esac
   case $col in *[!0-9]*) col=0 ;; esac
 
-  if [ -n "${LAZYGIT_NVIM_EDIT_REQUEST:-}" ] && [ -x "${LAZYGIT_NVIM_EDIT_HELPER:-}" ]; then
-    "$LAZYGIT_NVIM_EDIT_HELPER" "$file" "$line" "$col"
-    exit 0
-  fi
-
-  # Standalone lazydiff has no parent editor. Replace it with the normal
-  # configured Neovim instead of leaving the file in the lightweight viewer.
   trap - EXIT HUP INT TERM
   rm -f "$EDIT_HANDOFF"
   unset NVIM_PORTABLE_LAZYDIFF LAZYDIFF_EDIT_HANDOFF LAZYDIFF_FILE

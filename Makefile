@@ -3,8 +3,6 @@ SHELL := /bin/sh
 
 ARCH ?= x86_64
 NVIM_VERSION ?= v0.12.5
-LAZYGIT_VERSION ?= 0.65.1
-VIFM_VERSION ?= 0.14.4
 
 DIST_DIR := dist
 DOWNLOAD_DIR := .cache
@@ -16,42 +14,27 @@ LAZYDIFF_NAME := lazydiff
 LAZYREPO_NAME := lazyrepo
 LAZYDATA_NAME := lazydata
 LAZYDATA_SQL_NAME := lazydata-sql
-LAZYGIT_NAME := lazygit
-VIFM_NAME := vifm
 NVIM_OUTPUT := $(DIST_DIR)/$(NVIM_NAME)
 NVIMA_OUTPUT := $(DIST_DIR)/$(NVIMA_NAME)
 LAZYDIFF_OUTPUT := $(DIST_DIR)/$(LAZYDIFF_NAME)
 LAZYREPO_OUTPUT := $(DIST_DIR)/$(LAZYREPO_NAME)
 LAZYDATA_OUTPUT := $(DIST_DIR)/$(LAZYDATA_NAME)
 LAZYDATA_SQL_OUTPUT := $(DIST_DIR)/$(LAZYDATA_SQL_NAME)
-LAZYGIT_OUTPUT := $(DIST_DIR)/$(LAZYGIT_NAME)
-VIFM_OUTPUT := $(DIST_DIR)/$(VIFM_NAME)
 
 NVIM_SOURCE_DIR := nvim
 NVIMA_SOURCE_DIR := nvima
-LAZYGIT_SOURCE_DIR := lazygit
-VIFM_SOURCE_DIR := vifm
 
 NVIM_ARCHIVE := $(DOWNLOAD_DIR)/nvim-linux-$(ARCH)-$(NVIM_VERSION).tar.gz
 NVIM_URL := https://github.com/neovim/neovim/releases/download/$(NVIM_VERSION)/nvim-linux-$(ARCH).tar.gz
-LAZYGIT_ARCHIVE := $(DOWNLOAD_DIR)/lazygit-linux-$(ARCH)-v$(LAZYGIT_VERSION).tar.gz
-LAZYGIT_URL := https://github.com/jesseduffield/lazygit/releases/download/v$(LAZYGIT_VERSION)/lazygit_$(LAZYGIT_VERSION)_linux_$(ARCH).tar.gz
-VIFM_APPIMAGE := $(DOWNLOAD_DIR)/vifm-linux-x86_64-v$(VIFM_VERSION).AppImage
-VIFM_URL := https://github.com/vifm/vifm/releases/download/v$(VIFM_VERSION)/vifm-v$(VIFM_VERSION)-x86_64.AppImage
 
 NVIM_SHA256_x86_64 := bce0f56eda1f1b1db6eee8f4133d7a38813ea07933837dd1777411ca384c6875
 NVIM_SHA256_arm64 := 1aa5ca085249580ae0f91eb14f27ec0919773ff2d99a163d03f3d6c21ac29725
-LAZYGIT_SHA256_x86_64 := 02beacbcda0fa342e50ae3480ba8147307353af3fb28e1d5f790e02329c201a6
-LAZYGIT_SHA256_arm64 := 49abecdf6adf4f2dfdb11bf7b9bfada267ea523612ed809d1c6d87f6c04000a7
-VIFM_SHA256_x86_64 := c8568514e0bf276c2031a381ed7a2c48312deb29c528575060c7cd1da40d99c5
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= nvim
 LIBRO_DIR ?= $(CURDIR)/../libro
 NVIM_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
-LAZYGIT_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/lazygit-portable
-VIFM_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/vifm-portable
 
 .PHONY: all help build update install release-assets libro-tools publish clean
 
@@ -60,7 +43,7 @@ all: help
 help:
 	@printf '%s\n' \
 	  'Available commands:' \
-	  '  make build    Build portable nvim, nvima, LazyData, git tools, and vifm on x86_64' \
+	  '  make build    Build portable nvim, nvima, LazyData, and git tools' \
 	  '  make update   Refresh cached downloads for the selected architecture' \
 	  '  make install  Build and install commands under ~/.local/bin' \
 	  '  make libro-tools  Build release assets and copy them into the Libro project' \
@@ -83,45 +66,13 @@ $(NVIM_ARCHIVE):
 	mv "$$TMP" "$@"
 	trap - EXIT HUP INT TERM
 
-$(LAZYGIT_ARCHIVE):
-	set -eu
-	case "$(ARCH)" in
-	  x86_64) EXPECTED='$(LAZYGIT_SHA256_x86_64)' ;;
-	  arm64) EXPECTED='$(LAZYGIT_SHA256_arm64)' ;;
-	  *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;;
-	esac
-	mkdir -p "$(DOWNLOAD_DIR)"
-	TMP="$@.tmp.$$$$"
-	trap 'rm -f "$$TMP"' EXIT HUP INT TERM
-	echo "Downloading Lazygit v$(LAZYGIT_VERSION) for Linux $(ARCH)..."
-	curl -fL --retry 3 -o "$$TMP" "$(LAZYGIT_URL)"
-	printf '%s  %s\n' "$$EXPECTED" "$$TMP" | sha256sum -c -
-	mv "$$TMP" "$@"
-	trap - EXIT HUP INT TERM
-
-$(VIFM_APPIMAGE):
-	set -eu
-	mkdir -p "$(DOWNLOAD_DIR)"
-	TMP="$@.tmp.$$$$"
-	trap 'rm -f "$$TMP"' EXIT HUP INT TERM
-	echo "Downloading Vifm v$(VIFM_VERSION) for Linux x86_64..."
-	curl -fL --retry 3 -o "$$TMP" "$(VIFM_URL)"
-	printf '%s  %s\n' '$(VIFM_SHA256_x86_64)' "$$TMP" | sha256sum -c -
-	chmod 755 "$$TMP"
-	mv "$$TMP" "$@"
-	trap - EXIT HUP INT TERM
-
 update:
 	set -eu
 	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
-	rm -f "$(NVIM_ARCHIVE)" "$(LAZYGIT_ARCHIVE)"
-	$(MAKE) "$(NVIM_ARCHIVE)" "$(LAZYGIT_ARCHIVE)" ARCH="$(ARCH)"
-	if [ "$(ARCH)" = x86_64 ]; then
-	  rm -f "$(VIFM_APPIMAGE)"
-	  $(MAKE) "$(VIFM_APPIMAGE)"
-	fi
+	rm -f "$(NVIM_ARCHIVE)"
+	$(MAKE) "$(NVIM_ARCHIVE)" ARCH="$(ARCH)"
 
-build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
+build: $(NVIM_ARCHIVE)
 	set -eu
 	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
 	test -f "$(NVIM_SOURCE_DIR)/init.lua" || { echo 'Neovim init.lua is missing' >&2; exit 1; }
@@ -131,8 +82,6 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	test -d "$(NVIM_SOURCE_DIR)/supermaven-nvim" || { echo 'Bundled supermaven-nvim is missing' >&2; exit 1; }
 	test -f "$(NVIMA_SOURCE_DIR)/init.lua" || { echo 'nvima init.lua is missing' >&2; exit 1; }
 	test -f "$(NVIMA_SOURCE_DIR)/launcher.sh" || { echo 'nvima launcher is missing' >&2; exit 1; }
-	test -f "$(LAZYGIT_SOURCE_DIR)/config.yml" || { echo 'Lazygit config is missing' >&2; exit 1; }
-	test -x "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" || { echo 'Lazygit edit helper is missing or not executable' >&2; exit 1; }
 	WORK=$$(mktemp -d)
 	trap 'rm -rf "$$WORK"' EXIT HUP INT TERM
 	mkdir -p "$$WORK/nvim-payload/config" "$(DIST_DIR)"
@@ -175,25 +124,6 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	chmod 755 "$(NVIMA_OUTPUT)"
 	echo "Built $(NVIMA_OUTPUT) ($$(du -h "$(NVIMA_OUTPUT)" | cut -f1))"
 
-	mkdir -p "$$WORK/lazygit-payload/config" "$$WORK/lazygit-unpacked"
-	tar -xzf "$(LAZYGIT_ARCHIVE)" -C "$$WORK/lazygit-unpacked"
-	test -x "$$WORK/lazygit-unpacked/lazygit" || { echo 'Lazygit archive does not contain lazygit' >&2; exit 1; }
-	mv "$$WORK/lazygit-unpacked/lazygit" "$$WORK/lazygit-payload/lazygit"
-	cp "$(LAZYGIT_SOURCE_DIR)/config.yml" "$(LAZYGIT_SOURCE_DIR)/light-theme.yml" "$(LAZYGIT_SOURCE_DIR)/state.yml" "$(LAZYGIT_SOURCE_DIR)/nvim-edit-parent" "$$WORK/lazygit-payload/config/"
-	chmod 755 "$$WORK/lazygit-payload/config/nvim-edit-parent"
-	LAZYGIT_CONFIG_HASH=$$(cd "$$WORK/lazygit-payload/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
-	LAZYGIT_HASH=$$(sha256sum "$(LAZYGIT_ARCHIVE)" | cut -d' ' -f1)
-	LAZYGIT_PAYLOAD_ID=$$(printf '%s\n' '$(LAZYGIT_VERSION)-$(ARCH)' "$$LAZYGIT_HASH" "$$LAZYGIT_CONFIG_HASH" | sha256sum | cut -c1-16)
-	LAZYGIT_STUB="$$WORK/lazygit-stub"
-	cp "$(LAZYGIT_SOURCE_DIR)/launcher.sh" "$$LAZYGIT_STUB"
-	sed -i "s/@PAYLOAD_ID@/$$LAZYGIT_PAYLOAD_ID/" "$$LAZYGIT_STUB"
-	LAZYGIT_ARCHIVE_LINE=$$(( $$(wc -l <"$$LAZYGIT_STUB") + 1 ))
-	sed -i "s/@ARCHIVE_LINE@/$$LAZYGIT_ARCHIVE_LINE/" "$$LAZYGIT_STUB"
-	tar -czf "$$WORK/lazygit-payload.tar.gz" -C "$$WORK" lazygit-payload
-	cat "$$LAZYGIT_STUB" "$$WORK/lazygit-payload.tar.gz" >"$(LAZYGIT_OUTPUT)"
-	chmod 755 "$(LAZYGIT_OUTPUT)"
-	echo "Built $(LAZYGIT_OUTPUT) ($$(du -h "$(LAZYGIT_OUTPUT)" | cut -f1))"
-
 	sed 's/@INSTALL_NAME@/$(INSTALL_NAME)/g' "$(NVIM_SOURCE_DIR)/lazydiff.sh" >"$(LAZYDIFF_OUTPUT)"
 	chmod 755 "$(LAZYDIFF_OUTPUT)"
 	echo "Built $(LAZYDIFF_OUTPUT)"
@@ -207,33 +137,6 @@ build: $(NVIM_ARCHIVE) $(LAZYGIT_ARCHIVE)
 	chmod 755 "$(LAZYDATA_SQL_OUTPUT)"
 	echo "Built $(LAZYDATA_OUTPUT) and $(LAZYDATA_SQL_OUTPUT)"
 
-	if [ "$(ARCH)" = x86_64 ]; then
-	  $(MAKE) "$(VIFM_APPIMAGE)"
-	  test -f "$(VIFM_SOURCE_DIR)/vifmrc" || { echo 'Vifm config is missing' >&2; exit 1; }
-	  VIFM_IMAGE=$$(cd "$(DOWNLOAD_DIR)" && pwd)/$$(basename "$(VIFM_APPIMAGE)")
-	  mkdir -p "$$WORK/vifm-extract" "$$WORK/vifm-payload/config"
-	  (cd "$$WORK/vifm-extract" && "$$VIFM_IMAGE" --appimage-extract >/dev/null 2>&1)
-	  mv "$$WORK/vifm-extract/squashfs-root" "$$WORK/vifm-payload/app"
-	  cp "$(VIFM_SOURCE_DIR)/vifmrc" "$$WORK/vifm-payload/config/vifmrc"
-	  cp -R "$(VIFM_SOURCE_DIR)/colors" "$$WORK/vifm-payload/config/colors"
-	  cp -R "$(VIFM_SOURCE_DIR)/scripts" "$$WORK/vifm-payload/config/scripts"
-	  VIFM_CONFIG_HASH=$$(cd "$$WORK/vifm-payload/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
-	  VIFM_HASH=$$(sha256sum "$(VIFM_APPIMAGE)" | cut -d' ' -f1)
-	  VIFM_PAYLOAD_ID=$$(printf '%s\n' '$(VIFM_VERSION)-x86_64' "$$VIFM_HASH" "$$VIFM_CONFIG_HASH" | sha256sum | cut -c1-16)
-	  VIFM_STUB="$$WORK/vifm-stub"
-	  cp "$(VIFM_SOURCE_DIR)/launcher.sh" "$$VIFM_STUB"
-	  sed -i "s/@PAYLOAD_ID@/$$VIFM_PAYLOAD_ID/" "$$VIFM_STUB"
-	  VIFM_ARCHIVE_LINE=$$(( $$(wc -l <"$$VIFM_STUB") + 1 ))
-	  sed -i "s/@ARCHIVE_LINE@/$$VIFM_ARCHIVE_LINE/" "$$VIFM_STUB"
-	  tar -czf "$$WORK/vifm-payload.tar.gz" -C "$$WORK" vifm-payload
-	  cat "$$VIFM_STUB" "$$WORK/vifm-payload.tar.gz" >"$(VIFM_OUTPUT)"
-	  chmod 755 "$(VIFM_OUTPUT)"
-	  echo "Built $(VIFM_OUTPUT) ($$(du -h "$(VIFM_OUTPUT)" | cut -f1))"
-	else
-	  rm -f "$(VIFM_OUTPUT)"
-	  echo 'Skipped Vifm (not available for arm64)'
-	fi
-
 install: build
 	install -d "$(BINDIR)"
 	install -m 755 "$(NVIM_OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
@@ -243,17 +146,13 @@ install: build
 	install -m 755 "$(LAZYDATA_OUTPUT)" "$(BINDIR)/$(LAZYDATA_NAME)"
 	install -m 755 "$(LAZYDATA_SQL_OUTPUT)" "$(BINDIR)/$(LAZYDATA_SQL_NAME)"
 	rm -f "$(BINDIR)/lazydata-backend"
-	install -m 755 "$(LAZYGIT_OUTPUT)" "$(BINDIR)/$(LAZYGIT_NAME)"
-	if [ "$(ARCH)" = x86_64 ]; then install -m 755 "$(VIFM_OUTPUT)" "$(BINDIR)/$(VIFM_NAME)"; fi
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
 	echo "Installed $(BINDIR)/$(NVIMA_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYREPO_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDATA_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDATA_SQL_NAME)"
-	echo "Installed $(BINDIR)/$(LAZYGIT_NAME)"
-	if [ "$(ARCH)" = x86_64 ]; then echo "Installed $(BINDIR)/$(VIFM_NAME)"; fi
-	rm -rf "$(NVIM_PORTABLE_CACHE_DIR)" "$(LAZYGIT_PORTABLE_CACHE_DIR)" "$(VIFM_PORTABLE_CACHE_DIR)"
+	rm -rf "$(NVIM_PORTABLE_CACHE_DIR)"
 	echo 'Cleared portable runtime caches'
 	$(MAKE) clean
 
@@ -263,11 +162,7 @@ release-assets:
 	trap 'rm -rf "$$WORK"' EXIT HUP INT TERM
 	for ARCH_VALUE in x86_64 arm64; do
 	  $(MAKE) build ARCH="$$ARCH_VALUE"
-	  if [ "$$ARCH_VALUE" = x86_64 ]; then
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(NVIMA_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYDATA_NAME)" "$(LAZYDATA_SQL_NAME)" "$(LAZYGIT_NAME)" "$(VIFM_NAME)"
-	  else
-	    tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(NVIMA_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYDATA_NAME)" "$(LAZYDATA_SQL_NAME)" "$(LAZYGIT_NAME)"
-	  fi
+	  tar -czf "$$WORK/nvim-linux-$$ARCH_VALUE.tar.gz" -C "$(DIST_DIR)" "$(NVIM_NAME)" "$(NVIMA_NAME)" "$(LAZYDIFF_NAME)" "$(LAZYREPO_NAME)" "$(LAZYDATA_NAME)" "$(LAZYDATA_SQL_NAME)"
 	done
 	rm -rf "$(RELEASE_DIR)"
 	mkdir -p "$(RELEASE_DIR)"
@@ -287,9 +182,10 @@ release-assets:
 	  command -v "$$command_name" >/dev/null 2>&1 || fail "required command not found: $$command_name"
 	done
 	[ "$$(uname -s)" = Linux ] || fail "unsupported operating system: $$(uname -s)"
+	commands='nvim nvima lazydiff lazyrepo lazydata lazydata-sql'
 	case $$(uname -m) in
-	  x86_64|amd64) arch=x86_64; commands='nvim nvima lazydiff lazyrepo lazydata lazydata-sql lazygit vifm' ;;
-	  aarch64|arm64) arch=arm64; commands='nvim nvima lazydiff lazyrepo lazydata lazydata-sql lazygit' ;;
+	  x86_64|amd64) arch=x86_64 ;;
+	  aarch64|arm64) arch=arm64 ;;
 	  *) fail "unsupported Linux architecture: $$(uname -m)" ;;
 	esac
 	asset="nvim-linux-$$arch.tar.gz"
@@ -315,7 +211,7 @@ release-assets:
 	rmdir "$$stage"
 	rm -f "$$BINDIR/lazydata-backend"
 	cache_base=$${XDG_CACHE_HOME:-"$$HOME/.cache"}
-	rm -rf "$$cache_base/nvim-portable" "$$cache_base/lazygit-portable" "$$cache_base/vifm-portable"
+	rm -rf "$$cache_base/nvim-portable"
 	for command_name in $$commands; do echo "Installed $$BINDIR/$$command_name"; done
 	case :$${PATH:-}: in
 	  *:"$$BINDIR":*) ;;

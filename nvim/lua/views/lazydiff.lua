@@ -1535,7 +1535,7 @@ local function open_layout()
 end
 
 -- opts.allow_empty keeps the viewer open with a "No changes" placeholder.
--- opts.focus_file selects the repo-relative file requested by LazyGit.
+-- opts.focus_file selects the repo-relative file to focus first.
 function M.open(opts)
   opts = opts or {}
   close()
