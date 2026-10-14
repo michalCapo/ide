@@ -317,7 +317,7 @@ local function on_stdout(_, data)
 end
 
 local function backend_path()
-  return vim.env.LAZYDATA_SQL or vim.env.LAZYDATA_BACKEND or "lazydata-sql"
+  return vim.env.LAZYDATA_SQL or vim.env.LAZYDATA_BACKEND or "vimd-sql"
 end
 
 local function start_backend()

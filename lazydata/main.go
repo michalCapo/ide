@@ -88,7 +88,7 @@ type Server struct {
 func main() {
 	path, err := configPath()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "lazydata-sql:", err)
+		fmt.Fprintln(os.Stderr, "vimd-sql:", err)
 		os.Exit(1)
 	}
 	s := &Server{configPath: path, pools: map[string]*sql.DB{}, cancels: map[string]context.CancelFunc{}, out: json.NewEncoder(os.Stdout)}
@@ -104,7 +104,7 @@ func main() {
 		go s.dispatch(req)
 	}
 	if err := scan.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "lazydata-sql:", err)
+		fmt.Fprintln(os.Stderr, "vimd-sql:", err)
 	}
 }
 

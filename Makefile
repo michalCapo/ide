@@ -9,11 +9,11 @@ DOWNLOAD_DIR := .cache
 RELEASE_DIR := $(DIST_DIR)/release
 
 NVIM_NAME := nvim
-NVIMA_NAME := nvima
-LAZYDIFF_NAME := lazydiff
-LAZYREPO_NAME := lazyrepo
-LAZYDATA_NAME := lazydata
-LAZYDATA_SQL_NAME := lazydata-sql
+NVIMA_NAME := vime
+LAZYDIFF_NAME := vimi
+LAZYREPO_NAME := vimg
+LAZYDATA_NAME := vimd
+LAZYDATA_SQL_NAME := vimd-sql
 NVIM_OUTPUT := $(DIST_DIR)/$(NVIM_NAME)
 NVIMA_OUTPUT := $(DIST_DIR)/$(NVIMA_NAME)
 LAZYDIFF_OUTPUT := $(DIST_DIR)/$(LAZYDIFF_NAME)
@@ -43,7 +43,7 @@ all: help
 help:
 	@printf '%s\n' \
 	  'Available commands:' \
-	  '  make build    Build portable nvim, nvima, LazyData, and git tools' \
+	  '  make build    Build portable nvim, vime, vimi, vimg, and vimd' \
 	  '  make update   Refresh cached downloads for the selected architecture' \
 	  '  make install  Build and install commands under ~/.local/bin' \
 	  '  make libro-tools  Build release assets and copy them into the Libro project' \
@@ -139,13 +139,13 @@ build: $(NVIM_ARCHIVE)
 
 install: build
 	install -d "$(BINDIR)"
+	rm -f "$(BINDIR)/lazydata-backend" "$(BINDIR)/nvima" "$(BINDIR)/lazydiff" "$(BINDIR)/lazyrepo" "$(BINDIR)/lazydata" "$(BINDIR)/lazydata-sql"
 	install -m 755 "$(NVIM_OUTPUT)" "$(BINDIR)/$(INSTALL_NAME)"
 	install -m 755 "$(NVIMA_OUTPUT)" "$(BINDIR)/$(NVIMA_NAME)"
 	install -m 755 "$(LAZYDIFF_OUTPUT)" "$(BINDIR)/$(LAZYDIFF_NAME)"
 	install -m 755 "$(LAZYREPO_OUTPUT)" "$(BINDIR)/$(LAZYREPO_NAME)"
 	install -m 755 "$(LAZYDATA_OUTPUT)" "$(BINDIR)/$(LAZYDATA_NAME)"
 	install -m 755 "$(LAZYDATA_SQL_OUTPUT)" "$(BINDIR)/$(LAZYDATA_SQL_NAME)"
-	rm -f "$(BINDIR)/lazydata-backend"
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
 	echo "Installed $(BINDIR)/$(NVIMA_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
@@ -182,7 +182,7 @@ release-assets:
 	  command -v "$$command_name" >/dev/null 2>&1 || fail "required command not found: $$command_name"
 	done
 	[ "$$(uname -s)" = Linux ] || fail "unsupported operating system: $$(uname -s)"
-	commands='nvim nvima lazydiff lazyrepo lazydata lazydata-sql'
+	commands='nvim vime vimi vimg vimd vimd-sql'
 	case $$(uname -m) in
 	  x86_64|amd64) arch=x86_64 ;;
 	  aarch64|arm64) arch=arm64 ;;
@@ -209,7 +209,7 @@ release-assets:
 	for command_name in $$commands; do cp "$$work/unpacked/$$command_name" "$$stage/$$command_name"; done
 	for command_name in $$commands; do mv "$$stage/$$command_name" "$$BINDIR/$$command_name"; done
 	rmdir "$$stage"
-	rm -f "$$BINDIR/lazydata-backend"
+	rm -f "$$BINDIR/lazydata-backend" "$$BINDIR/nvima" "$$BINDIR/lazydiff" "$$BINDIR/lazyrepo" "$$BINDIR/lazydata" "$$BINDIR/lazydata-sql"
 	cache_base=$${XDG_CACHE_HOME:-"$$HOME/.cache"}
 	rm -rf "$$cache_base/nvim-portable"
 	for command_name in $$commands; do echo "Installed $$BINDIR/$$command_name"; done

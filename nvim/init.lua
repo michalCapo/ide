@@ -1994,9 +1994,9 @@ vim.keymap.set({ "n", "t" }, "<Esc>3", _G.nvim_focus_dap_terminal, { desc = "Foc
 vim.keymap.set({ "n", "t" }, "<leader>dT", _G.nvim_focus_dap_terminal, { desc = "Focus DAP terminal", silent = true })
 
 function _G.open_lazyrepo()
-  local lazyrepo = vim.env.NVIM_PORTABLE_LAZYREPO or "lazyrepo"
+  local lazyrepo = vim.env.NVIM_PORTABLE_LAZYREPO or "vimg"
   if vim.fn.executable(lazyrepo) ~= 1 then
-    vim.notify("lazyrepo is not installed or not on PATH", vim.log.levels.ERROR)
+    vim.notify("vimg is not installed or not on PATH", vim.log.levels.ERROR)
     return
   end
 
@@ -2072,9 +2072,9 @@ function _G.open_lazyrepo()
 end
 
 function _G.open_lazydata()
-  local lazydata = vim.env.NVIM_PORTABLE_LAZYDATA or "lazydata"
+  local lazydata = vim.env.NVIM_PORTABLE_LAZYDATA or "vimd"
   if vim.fn.executable(lazydata) ~= 1 then
-    vim.notify("lazydata is not installed or not on PATH", vim.log.levels.ERROR)
+    vim.notify("vimd is not installed or not on PATH", vim.log.levels.ERROR)
     return
   end
 
@@ -2774,8 +2774,8 @@ _G.nvim_keymap_search_groups = {
       { "<leader>e", "Project errors view" },
       { "<leader>f", "Toggle file explorer" },
       { "<leader>gb", "Git blame current line" },
-      { "<leader>gg", "Open lazyrepo" },
-      { "<leader>gd", "Open lazydata" },
+      { "<leader>gg", "Open vimg" },
+      { "<leader>gd", "Open vimd" },
     },
   },
   {
@@ -8079,8 +8079,8 @@ local function git_blame_current_line()
 end
 
 vim.keymap.set("n", "<leader>gb", git_blame_current_line, { desc = "Git blame current line" })
-vim.keymap.set("n", "<leader>gg", _G.open_lazyrepo, { desc = "Open lazyrepo" })
-vim.keymap.set("n", "<leader>gd", _G.open_lazydata, { desc = "Open lazydata" })
+vim.keymap.set("n", "<leader>gg", _G.open_lazyrepo, { desc = "Open vimg" })
+vim.keymap.set("n", "<leader>gd", _G.open_lazydata, { desc = "Open vimd" })
 vim.keymap.set("n", "<leader>ge", function()
   references_view.project_errors()
 end, { desc = "Project errors" })

@@ -3,7 +3,7 @@ set -eu
 
 usage() {
   cat <<'EOF'
-Usage: lazydiff [OPTION] FILE
+Usage: vimi [OPTION] FILE
 
 Open the Git diff viewer for the repository containing the current directory.
 
@@ -24,7 +24,7 @@ case ${1:-} in
     shift
     ;;
   -*)
-    echo "lazydiff: unknown option: $1" >&2
+    echo "vimi: unknown option: $1" >&2
     usage >&2
     exit 2
     ;;
@@ -36,7 +36,7 @@ if [ "$#" -eq 0 ]; then
 fi
 
 if [ "$#" -gt 1 ]; then
-  echo 'lazydiff: too many arguments' >&2
+  echo 'vimi: too many arguments' >&2
   usage >&2
   exit 2
 fi
@@ -46,7 +46,7 @@ NVIM_BIN=${LAZYDIFF_NVIM:-$SELF_DIR/@INSTALL_NAME@}
 if [ ! -x "$NVIM_BIN" ]; then
   NVIM_BIN=$(command -v "@INSTALL_NAME@" || true)
 fi
-[ -n "$NVIM_BIN" ] || { echo 'lazydiff requires @INSTALL_NAME@ on PATH' >&2; exit 127; }
+[ -n "$NVIM_BIN" ] || { echo 'vimi requires @INSTALL_NAME@ on PATH' >&2; exit 127; }
 export LAZYDIFF_FILE=$1
 export NVIM_PORTABLE_LAZYDIFF=1
 

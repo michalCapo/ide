@@ -1,23 +1,27 @@
 # Portable terminal tools
 
 Personal Neovim, database, and Git tools packaged as portable Linux commands.
-The build bundles `nvim` and `nvima` with their configuration and also creates
-the `lazydata`, `lazydiff`, and `lazyrepo` companion commands.
+The build bundles `nvim` and `vime` with their configuration and also creates
+the `vimi`, `vimg`, and `vimd` companion commands.
 
 ## Included commands
 
 Each command is built for both `x86_64` and `arm64`:
 
-- `nvim`
-- `nvima`
-- `lazydiff`
-- `lazyrepo`
-- `lazydata` and its `lazydata-sql` helper
+- `nvim`: the full editor
+- `vime`: the slimmer editor
+- `vimi`: the Git diff viewer
+- `vimg`: the Git repository dashboard
+- `vimd`: the LazyData database viewer, with its `vimd-sql` helper
+
+These commands were previously named `nvima`, `lazydiff`, `lazyrepo`,
+`lazydata`, and `lazydata-sql`. `make install` and the release installer
+remove the old names.
 
 The launchers unpack their bundled configuration below
 `${XDG_CACHE_HOME:-~/.cache}`.
 
-`nvima` is a slimmer build of the same editor. It keeps file management, LSP,
+`vime` is a slimmer build of the same editor. It keeps file management, LSP,
 completion, editing/navigation, and UI/shell features, and leaves out the AI
 agents, Git tools, database viewer, debugger, and run configurations. It builds
 its own payload and installs beside `nvim`, so both commands stay available.
@@ -60,19 +64,19 @@ Review changes in the current Git repository, initially focusing a specific
 repository-relative file:
 
 ```sh
-lazydiff
-lazydiff path/to/file
-lazydiff --help
+vimi
+vimi path/to/file
+vimi --help
 ```
 
-Running `lazydiff` without arguments prints its usage. Pass one `FILE` argument
+Running `vimi` without arguments prints its usage. Pass one `FILE` argument
 to launch the viewer. Use `--` before a file whose name begins with `-`.
 
 Open the repository-wide dashboard from anywhere inside a Git repository:
 
 ```sh
-lazyrepo
-lazyrepo --help
+vimg
+vimg --help
 ```
 
 The dashboard uses Files, Local/Remote/Stash, and Commits columns. In terminals
@@ -83,12 +87,12 @@ In Files, press `o` to open the selected file in the OS default application.
 Open the database viewer:
 
 ```sh
-lazydata
-lazydata --help
+vimd
+vimd --help
 ```
 
 LazyData supports PostgreSQL, SQL Server, and SQLite through its bundled
-`lazydata-sql` helper. Connection profiles are managed at startup and stored with mode `0600`
+`vimd-sql` helper. Connection profiles are managed at startup and stored with mode `0600`
 in `${XDG_CONFIG_HOME:-~/.config}/lazydata/connections.json`. Passwords are
 stored in plaintext in that file.
 
@@ -143,7 +147,7 @@ make clean   # remove dist/ but keep cached downloads
 - `nvim/` contains the Neovim configuration, bundled plugins, shared views, and
   companion command templates.
 - `nvima/` contains the reduced Neovim configuration and launcher used by the
-  `nvima` command.
+  `vime` command.
 - The root `Makefile` builds all portable commands and release assets.
 
 ## Use as a regular Neovim config

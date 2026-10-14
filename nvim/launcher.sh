@@ -23,15 +23,15 @@ if [ ! -x "$APP_DIR/nvim/bin/nvim" ]; then
 fi
 
 export NVIM_PORTABLE_INIT="$APP_DIR/config/init.lua"
-if [ -x "$SELF_DIR/lazyrepo" ]; then
-  export NVIM_PORTABLE_LAZYREPO="$SELF_DIR/lazyrepo"
+if [ -x "$SELF_DIR/vimg" ]; then
+  export NVIM_PORTABLE_LAZYREPO="$SELF_DIR/vimg"
 fi
-if [ -x "$SELF_DIR/lazydata" ]; then
-  export NVIM_PORTABLE_LAZYDATA="$SELF_DIR/lazydata"
+if [ -x "$SELF_DIR/vimd" ]; then
+  export NVIM_PORTABLE_LAZYDATA="$SELF_DIR/vimd"
 fi
-if [ -x "$SELF_DIR/lazydata-sql" ]; then
-  export NVIM_PORTABLE_LAZYDATA_SQL="$SELF_DIR/lazydata-sql"
-  export NVIM_PORTABLE_LAZYDATA_BACKEND="$SELF_DIR/lazydata-sql"
+if [ -x "$SELF_DIR/vimd-sql" ]; then
+  export NVIM_PORTABLE_LAZYDATA_SQL="$SELF_DIR/vimd-sql"
+  export NVIM_PORTABLE_LAZYDATA_BACKEND="$SELF_DIR/vimd-sql"
 fi
 unset VIM VIMRUNTIME
 if [ "$PORTABLE_VIEWER" = 1 ]; then
