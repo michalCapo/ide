@@ -1706,6 +1706,34 @@ vim.keymap.set("n", "<leader>bl", _G.nvim_delete_buffers_left, { desc = "Close b
 vim.keymap.set("n", "<leader>br", _G.nvim_delete_buffers_right, { desc = "Close buffers to the right" })
 vim.keymap.set("n", "<leader>bo", _G.nvim_delete_other_buffers, { desc = "Close other buffers" })
 
+-- Inside Libro, show images, PDFs, and HTML files in a Libro Browser panel
+-- instead of an outside app. File explorer `o`, `gx`, and <leader>bv use this.
+if vim.env.LIBRO_PANEL_ID then
+  local system_open = vim.ui.open
+  local libro_types = { avif = true, bmp = true, gif = true, htm = true, html = true, ico = true, jpeg = true, jpg = true, pdf = true, png = true, svg = true, webp = true }
+  vim.ui.open = function(path, opt)
+    local file = vim.fn.fnamemodify(vim.fs.normalize(path), ":p")
+    if not (opt and opt.cmd) and not path:match("^%a[%w+.-]*:") and libro_types[vim.fn.fnamemodify(path, ":e"):lower()] and vim.uv.fs_stat(file) then
+      local ok, cmd = pcall(vim.system, { vim.env.LIBRO_BIN or "libro", "open", file }, { text = true })
+      local result = ok and cmd:wait(5000) or { stderr = cmd }
+      if result.code == 0 then
+        return cmd
+      end
+      vim.notify("Libro could not show the file: " .. vim.trim(result.stderr or ""), vim.log.levels.WARN)
+    end
+    return system_open(path, opt)
+  end
+end
+
+vim.keymap.set("n", "<leader>bv", function()
+  local file = vim.api.nvim_buf_get_name(0)
+  if file == "" then
+    vim.notify("This buffer has no file", vim.log.levels.WARN)
+    return
+  end
+  vim.ui.open(file)
+end, { desc = "View file in Libro or the default app" })
+
 local bottom_terminal_buf
 local bottom_terminal_win
 local bottom_terminal_height = 8
@@ -2535,6 +2563,7 @@ _G.nvim_keymap_search_groups = {
       { "<leader>b l", "Close buffers to the left" },
       { "<leader>b r", "Close buffers to the right" },
       { "<leader>b o", "Close other buffers" },
+      { "<leader>b v", "View file in Libro or the default app" },
       { "<leader>q", "Quit window" },
       { "<Ctrl-t>", "Toggle bottom terminal" },
       { "<Alt-2>", "Focus file buffer" },

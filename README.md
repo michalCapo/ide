@@ -26,6 +26,11 @@ completion, editing/navigation, and UI/shell features, and leaves out the AI
 agents, Git tools, database viewer, debugger, and run configurations. It builds
 its own payload and installs beside `nvim`, so both commands stay available.
 
+Inside a Libro terminal, `nvim` and `vime` show images, PDFs, and HTML files in
+a Libro Browser panel beside the editor. Use `o` in the file explorer, `gx`, or
+`Space b v` for the current file. Other files, and files outside Libro, open in
+the default app.
+
 ## Requirements
 
 - Linux (`x86_64` or `arm64`)
