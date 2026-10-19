@@ -6495,11 +6495,30 @@ vim.keymap.set("n", "<leader>cl", function()
   open_diagnostic_float({ scope = "line" })
 end, { desc = "Line diagnostic" })
 
+-- Keep personal shortcuts visible before a language server attaches.
+local function set_lsp_keymaps(opts)
+  vim.keymap.set("n", "gd", function() references_view.definitions() end, vim.tbl_extend("force", opts, { desc = "Definitions view" }))
+  vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("force", opts, { desc = "Go to declaration" }))
+  vim.keymap.set("n", "gr", function() references_view.open() end, vim.tbl_extend("force", opts, { desc = "References view" }))
+  vim.keymap.set("n", "ge", function() references_view.errors() end, vim.tbl_extend("force", opts, { desc = "Current file errors view" }))
+  vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("force", opts, { desc = "Implementations" }))
+  vim.keymap.set("n", "gt", vim.lsp.buf.type_definition, vim.tbl_extend("force", opts, { desc = "Type definition" }))
+  vim.keymap.set("n", "go", lsp_document_symbols_picker, vim.tbl_extend("force", opts, { desc = "File symbols" }))
+  vim.keymap.set("n", "<leader>o", lsp_workspace_symbols_picker, vim.tbl_extend("force", opts, { desc = "Project symbols" }))
+  vim.keymap.set("n", "<leader>go", lsp_workspace_symbols_picker, vim.tbl_extend("force", opts, { desc = "Project symbols" }))
+  vim.keymap.set("n", "K", lsp_hover_popup, vim.tbl_extend("force", opts, { desc = "Hover" }))
+  vim.keymap.set("n", "<leader>k", lsp_hover_popup, vim.tbl_extend("force", opts, { desc = "Hover" }))
+  vim.keymap.set("n", "<leader>cr", vim.lsp.buf.rename, vim.tbl_extend("force", opts, { desc = "Rename" }))
+  vim.keymap.set({ "n", "x" }, "<leader>x", lsp_code_actions_list, vim.tbl_extend("force", opts, { desc = "Code actions list" }))
+  vim.keymap.set("n", "<leader>cf", function() vim.lsp.buf.format({ async = true }) end, vim.tbl_extend("force", opts, { desc = "Format" }))
+end
+
+set_lsp_keymaps({})
+
 local notify_lsp_ready
 
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(event)
-    local opts = { buffer = event.buf }
     local client = event.data and vim.lsp.get_client_by_id(event.data.client_id)
     if client then
       notify_lsp_ready(client.id)
@@ -6513,20 +6532,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
         vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = false })
       end
     end
-    vim.keymap.set("n", "gd", function() references_view.definitions() end, vim.tbl_extend("force", opts, { desc = "Definitions view" }))
-    vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("force", opts, { desc = "Go to declaration" }))
-    vim.keymap.set("n", "gr", function() references_view.open() end, vim.tbl_extend("force", opts, { desc = "References view" }))
-    vim.keymap.set("n", "ge", function() references_view.errors() end, vim.tbl_extend("force", opts, { desc = "Current file errors view" }))
-    vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("force", opts, { desc = "Implementations" }))
-    vim.keymap.set("n", "gt", vim.lsp.buf.type_definition, vim.tbl_extend("force", opts, { desc = "Type definition" }))
-    vim.keymap.set("n", "go", lsp_document_symbols_picker, vim.tbl_extend("force", opts, { desc = "File symbols" }))
-    vim.keymap.set("n", "<leader>o", lsp_workspace_symbols_picker, vim.tbl_extend("force", opts, { desc = "Project symbols" }))
-    vim.keymap.set("n", "<leader>go", lsp_workspace_symbols_picker, vim.tbl_extend("force", opts, { desc = "Project symbols" }))
-    vim.keymap.set("n", "K", lsp_hover_popup, vim.tbl_extend("force", opts, { desc = "Hover" }))
-    vim.keymap.set("n", "<leader>k", lsp_hover_popup, vim.tbl_extend("force", opts, { desc = "Hover" }))
-    vim.keymap.set("n", "<leader>cr", vim.lsp.buf.rename, vim.tbl_extend("force", opts, { desc = "Rename" }))
-    vim.keymap.set({ "n", "x" }, "<leader>x", lsp_code_actions_list, vim.tbl_extend("force", opts, { desc = "Code actions list" }))
-    vim.keymap.set("n", "<leader>cf", function() vim.lsp.buf.format({ async = true }) end, vim.tbl_extend("force", opts, { desc = "Format" }))
+    set_lsp_keymaps({ buffer = event.buf })
   end,
 })
 
