@@ -19,5 +19,22 @@ if [ ! -x "$APP_DIR/nvim/bin/nvim" ]; then
 fi
 
 export NVIM_PORTABLE_INIT="$APP_DIR/config/init.lua"
+DEPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/vime/dependencies"
+export PATH="$DEPS_DIR/bin:$PATH"
+case "${1:-}" in
+  -h|--help|-v|--version) ;;
+  *)
+    if [ "${VIME_INSTALL_DEPS:-1}" != 0 ]; then
+      if ! sh "$APP_DIR/config/setup-dependencies.sh" "$DEPS_DIR" "$APP_DIR/config/micromamba"; then
+        echo 'Vime: dependency setup failed. Opening the editor; setup will retry next launch.' >&2
+      fi
+    fi
+    ;;
+esac
 unset VIM VIMRUNTIME
-exec "$APP_DIR/nvim/bin/nvim" -u "$NVIM_PORTABLE_INIT" "$@"
+set -- "$APP_DIR/nvim/bin/nvim" -u "$NVIM_PORTABLE_INIT" "$@"
+if [ -f "$DEPS_DIR/conda-meta/history" ]; then
+  exec "$APP_DIR/config/micromamba" --no-rc --no-env --root-prefix "${DEPS_DIR%/*}/packages" \
+    run --attach '' --prefix "$DEPS_DIR" "$@"
+fi
+exec "$@"

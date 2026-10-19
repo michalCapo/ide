@@ -3,6 +3,7 @@ SHELL := /bin/sh
 
 ARCH ?= x86_64
 NVIM_VERSION ?= v0.12.5
+MICROMAMBA_VERSION := 2.9.0-0
 
 DIST_DIR := dist
 DOWNLOAD_DIR := .cache
@@ -29,6 +30,12 @@ NVIM_URL := https://github.com/neovim/neovim/releases/download/$(NVIM_VERSION)/n
 
 NVIM_SHA256_x86_64 := bce0f56eda1f1b1db6eee8f4133d7a38813ea07933837dd1777411ca384c6875
 NVIM_SHA256_arm64 := 1aa5ca085249580ae0f91eb14f27ec0919773ff2d99a163d03f3d6c21ac29725
+
+MICROMAMBA_BINARY := $(DOWNLOAD_DIR)/micromamba-$(ARCH)-$(MICROMAMBA_VERSION)
+MICROMAMBA_PLATFORM_x86_64 := linux-64
+MICROMAMBA_PLATFORM_arm64 := linux-aarch64
+MICROMAMBA_SHA256_x86_64 := 366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3
+MICROMAMBA_SHA256_arm64 := 9f93b974adcb4d166996af969b6cd371287d1a3e52733704727884d9b74cb7a7
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
@@ -66,13 +73,25 @@ $(NVIM_ARCHIVE):
 	mv "$$TMP" "$@"
 	trap - EXIT HUP INT TERM
 
+$(MICROMAMBA_BINARY):
+	set -eu
+	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
+	mkdir -p "$(DOWNLOAD_DIR)"
+	TMP="$@.tmp.$$$$"
+	trap 'rm -f "$$TMP"' EXIT HUP INT TERM
+	curl -fL --retry 3 -o "$$TMP" "https://github.com/mamba-org/micromamba-releases/releases/download/$(MICROMAMBA_VERSION)/micromamba-$(MICROMAMBA_PLATFORM_$(ARCH))"
+	printf '%s  %s\n' '$(MICROMAMBA_SHA256_$(ARCH))' "$$TMP" | sha256sum -c -
+	chmod 755 "$$TMP"
+	mv "$$TMP" "$@"
+	trap - EXIT HUP INT TERM
+
 update:
 	set -eu
 	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
 	rm -f "$(NVIM_ARCHIVE)"
 	$(MAKE) "$(NVIM_ARCHIVE)" ARCH="$(ARCH)"
 
-build: $(NVIM_ARCHIVE)
+build: $(NVIM_ARCHIVE) $(MICROMAMBA_BINARY)
 	set -eu
 	case "$(ARCH)" in x86_64|arm64) ;; *) echo "Unsupported architecture: $(ARCH)" >&2; exit 2 ;; esac
 	test -f "$(NVIM_SOURCE_DIR)/init.lua" || { echo 'Neovim init.lua is missing' >&2; exit 1; }
@@ -109,6 +128,9 @@ build: $(NVIM_ARCHIVE)
 	mkdir -p "$$NVIMA_MK/config/lua/views"
 	cp -R "$$WORK/nvim-payload/nvim" "$$NVIMA_MK/nvim"
 	cp "$(NVIMA_SOURCE_DIR)/init.lua" "$$NVIMA_MK/config/init.lua"
+	cp "$(NVIMA_SOURCE_DIR)/setup-dependencies.sh" "$$NVIMA_MK/config/setup-dependencies.sh"
+	cp "$(NVIMA_SOURCE_DIR)/micromamba-LICENSE.txt" "$$NVIMA_MK/config/micromamba-LICENSE.txt"
+	cp "$(MICROMAMBA_BINARY)" "$$NVIMA_MK/config/micromamba"
 	cp "$(NVIM_SOURCE_DIR)/lua/views/references.lua" "$$NVIMA_MK/config/lua/views/references.lua"
 	cp "$(NVIM_SOURCE_DIR)/lua/views/search.lua" "$$NVIMA_MK/config/lua/views/search.lua"
 	cp -R "$(NVIM_SOURCE_DIR)/vscode-theme" "$$NVIMA_MK/config/vscode-theme"

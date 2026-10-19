@@ -26,6 +26,17 @@ completion, editing/navigation, and UI/shell features, and leaves out the AI
 agents, Git tools, database viewer, debugger, and run configurations. It builds
 its own payload and installs beside `nvim`, so both commands stay available.
 
+On first launch, `vime` automatically installs missing language servers
+(TypeScript/JavaScript, Go, and C/C++), Node.js, TypeScript, Go, ripgrep, Git, Bash,
+and Universal Ctags. Tools already available on `PATH` are reused. Downloads
+and their libraries stay under `${XDG_DATA_HOME:-~/.local/share}/vime/`;
+no sudo or shell configuration changes are needed. First-time setup needs
+internet access and can take a few minutes. Later launches reuse the tools.
+If setup fails, the editor still opens and retries on its next launch.
+Setup details are saved to `${XDG_DATA_HOME:-~/.local/share}/vime/setup.log`.
+Set `VIME_INSTALL_DEPS=0` to skip automatic installation. Help and version
+commands do not install dependencies.
+
 Inside a Libro terminal, `nvim` and `vime` show images, PDFs, and HTML files in
 a Libro Browser panel beside the editor. Use `o` in the file explorer, `gx`, or
 `Space b v` for the current file. Other files, and files outside Libro, open in
