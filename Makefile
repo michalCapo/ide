@@ -15,6 +15,7 @@ LAZYDIFF_NAME := vimi
 LAZYREPO_NAME := vimg
 LAZYDATA_NAME := vimd
 LAZYDATA_SQL_NAME := vimd-sql
+LAZYDATA_ALIAS_NAME := agent-db
 NVIM_OUTPUT := $(DIST_DIR)/$(NVIM_NAME)
 NVIMA_OUTPUT := $(DIST_DIR)/$(NVIMA_NAME)
 LAZYDIFF_OUTPUT := $(DIST_DIR)/$(LAZYDIFF_NAME)
@@ -168,12 +169,14 @@ install: build
 	install -m 755 "$(LAZYREPO_OUTPUT)" "$(BINDIR)/$(LAZYREPO_NAME)"
 	install -m 755 "$(LAZYDATA_OUTPUT)" "$(BINDIR)/$(LAZYDATA_NAME)"
 	install -m 755 "$(LAZYDATA_SQL_OUTPUT)" "$(BINDIR)/$(LAZYDATA_SQL_NAME)"
+	ln -sf "$(LAZYDATA_NAME)" "$(BINDIR)/$(LAZYDATA_ALIAS_NAME)"
 	echo "Installed $(BINDIR)/$(INSTALL_NAME)"
 	echo "Installed $(BINDIR)/$(NVIMA_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDIFF_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYREPO_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDATA_NAME)"
 	echo "Installed $(BINDIR)/$(LAZYDATA_SQL_NAME)"
+	echo "Installed $(BINDIR)/$(LAZYDATA_ALIAS_NAME) -> $(LAZYDATA_NAME)"
 	rm -rf "$(NVIM_PORTABLE_CACHE_DIR)"
 	echo 'Cleared portable runtime caches'
 	$(MAKE) clean
@@ -231,10 +234,12 @@ release-assets:
 	for command_name in $$commands; do cp "$$work/unpacked/$$command_name" "$$stage/$$command_name"; done
 	for command_name in $$commands; do mv "$$stage/$$command_name" "$$BINDIR/$$command_name"; done
 	rmdir "$$stage"
+	ln -sf vimd "$$BINDIR/agent-db"
 	rm -f "$$BINDIR/lazydata-backend" "$$BINDIR/nvima" "$$BINDIR/lazydiff" "$$BINDIR/lazyrepo" "$$BINDIR/lazydata" "$$BINDIR/lazydata-sql"
 	cache_base=$${XDG_CACHE_HOME:-"$$HOME/.cache"}
 	rm -rf "$$cache_base/nvim-portable"
 	for command_name in $$commands; do echo "Installed $$BINDIR/$$command_name"; done
+	echo "Installed $$BINDIR/agent-db -> vimd"
 	case :$${PATH:-}: in
 	  *:"$$BINDIR":*) ;;
 	  *) echo "Add $$BINDIR to PATH to use these commands." ;;

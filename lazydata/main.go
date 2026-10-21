@@ -20,7 +20,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/microsoft/go-mssqldb"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 const (
@@ -83,15 +83,23 @@ type Server struct {
 	pools      map[string]*sql.DB
 	cancels    map[string]context.CancelFunc
 	out        *json.Encoder
+	// readOnly blocks changes on every connection, as `vimd open` and the CLI
+	// do unless started with --alter.
+	readOnly bool
+	// timeoutMS overrides each connection's saved timeout when set (--timeout).
+	timeoutMS int
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(runCLI(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	path, err := configPath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "vimd-sql:", err)
 		os.Exit(1)
 	}
-	s := &Server{configPath: path, pools: map[string]*sql.DB{}, cancels: map[string]context.CancelFunc{}, out: json.NewEncoder(os.Stdout)}
+	s := &Server{configPath: path, pools: map[string]*sql.DB{}, cancels: map[string]context.CancelFunc{}, out: json.NewEncoder(os.Stdout), readOnly: os.Getenv("LAZYDATA_READ_ONLY") == "1"}
 	defer s.close()
 	scan := bufio.NewScanner(os.Stdin)
 	scan.Buffer(make([]byte, 64*1024), 16*1024*1024)
@@ -473,6 +481,12 @@ func (s *Server) pool(profileID, database string) (*sql.DB, Profile, error) {
 	if err != nil {
 		return nil, p, err
 	}
+	if s.readOnly {
+		p.ReadOnly = true
+	}
+	if s.timeoutMS > 0 {
+		p.TimeoutMS = s.timeoutMS
+	}
 	if p.Driver == "sqlite" {
 		info, statErr := os.Stat(p.Path)
 		if statErr != nil {
@@ -704,7 +718,7 @@ func displayColumns(columns []Column) []Column {
 	return columns
 }
 
-func (s *Server) columnsFor(ctx context.Context, db *sql.DB, profile Profile, p objectParams) ([]Column, error) {
+func (s *Server) columnsFor(ctx context.Context, db queryer, profile Profile, p objectParams) ([]Column, error) {
 	result := []Column{}
 	if profile.Driver == "sqlite" {
 		rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+quoteIdent("sqlite", p.Table)+`)`)
@@ -848,14 +862,22 @@ func scanRows(rows *sql.Rows, limit int) (ResultSet, error) {
 	return result, rows.Err()
 }
 
-func scanResultSets(rows *sql.Rows) ([]ResultSet, error) {
+// scanResultSets keeps at most limit rows per result set (0 = all). Extra rows
+// are still read so later statements in the batch run.
+func scanResultSets(rows *sql.Rows, limit int) ([]ResultSet, error) {
 	sets := []ResultSet{}
 	for {
-		result, err := scanRows(rows, 0)
+		result, err := scanRows(rows, limit)
 		if err != nil {
 			return nil, err
 		}
+		for limit > 0 && len(result.Rows) >= limit && rows.Next() {
+			result.HasMore = true
+		}
 		result.Message = fmt.Sprintf("%d row(s)", len(result.Rows))
+		if result.HasMore {
+			result.Message = fmt.Sprintf("first %d row(s); more rows not shown", len(result.Rows))
+		}
 		sets = append(sets, result)
 		if !rows.NextResultSet() {
 			break
@@ -892,7 +914,12 @@ func (s *Server) rows(req Request) (any, error) {
 	}
 	ctx, done := s.requestContext(req.ID, profile.TimeoutMS)
 	defer done()
-	cols, err := s.columnsFor(ctx, db, profile, p.objectParams)
+	q, release, err := s.readGuard(ctx, db, profile, p.RawWhere)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	cols, err := s.columnsFor(ctx, q, profile, p.objectParams)
 	if err != nil {
 		return nil, err
 	}
@@ -941,7 +968,7 @@ func (s *Server) rows(req Request) (any, error) {
 	} else {
 		query = fmt.Sprintf("SELECT %s FROM %s%s%s LIMIT %d OFFSET %d", selectList, table, where, order, p.PageSize+1, offset)
 	}
-	rows, err := db.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -983,7 +1010,7 @@ func (s *Server) deleteRows(req Request) (any, error) {
 		return nil, err
 	}
 	if profile.ReadOnly {
-		return nil, &APIError{Code: "read_only", Message: "This connection is read-only"}
+		return nil, s.readOnlyError()
 	}
 	ctx, done := s.requestContext(req.ID, profile.TimeoutMS)
 	defer done()
@@ -1070,7 +1097,7 @@ func (s *Server) updateRows(req Request) (any, error) {
 		return nil, err
 	}
 	if profile.ReadOnly {
-		return nil, &APIError{Code: "read_only", Message: "This connection is read-only"}
+		return nil, s.readOnlyError()
 	}
 	ctx, done := s.requestContext(req.ID, profile.TimeoutMS)
 	defer done()
@@ -1171,6 +1198,11 @@ func (s *Server) distinct(req Request) (any, error) {
 	}
 	ctx, done := s.requestContext(req.ID, profile.TimeoutMS)
 	defer done()
+	q, release, err := s.readGuard(ctx, db, profile, p.RawWhere)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	where, args := whereClause(profile.Driver, p.RawWhere, p.Predicates)
 	col := quoteIdent(profile.Driver, p.Column)
 	if p.Search != "" {
@@ -1198,7 +1230,7 @@ func (s *Server) distinct(req Request) (any, error) {
 	} else {
 		query += " LIMIT 200"
 	}
-	rows, err := db.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1217,7 +1249,8 @@ func (s *Server) distinct(req Request) (any, error) {
 
 type queryParams struct {
 	targetParams
-	SQL string `json:"sql"`
+	SQL   string `json:"sql"`
+	Limit int    `json:"limit"`
 }
 
 var firstToken = regexp.MustCompile(`(?is)^\s*(?:(?:--[^\n]*(?:\n|$)|/\*.*?\*/)\s*)*([a-z]+)`)
@@ -1248,6 +1281,108 @@ func returnsRows(query string) bool {
 	}
 	return false
 }
+
+// mssqlCode returns a T-SQL batch without strings, quoted identifiers, and
+// comments (which nest in T-SQL), so keywords can be found reliably.
+func mssqlCode(query string) string {
+	var b strings.Builder
+	for i := 0; i < len(query); i++ {
+		switch c := query[i]; {
+		case c == '-' && strings.HasPrefix(query[i:], "--"):
+			for i < len(query) && query[i] != '\n' {
+				i++
+			}
+		case c == '/' && strings.HasPrefix(query[i:], "/*"):
+			depth := 0
+			for ; i < len(query); i++ {
+				if strings.HasPrefix(query[i:], "/*") {
+					depth, i = depth+1, i+1
+				} else if strings.HasPrefix(query[i:], "*/") {
+					depth, i = depth-1, i+1
+					if depth == 0 {
+						break
+					}
+				}
+			}
+		case c == '\'' || c == '"' || c == '[':
+			closing := c
+			if c == '[' {
+				closing = ']'
+			}
+			for i++; i < len(query); i++ {
+				if query[i] == closing {
+					if i+1 < len(query) && query[i+1] == closing {
+						i++
+						continue
+					}
+					break
+				}
+			}
+		default:
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteByte(' ')
+	}
+	return b.String()
+}
+
+// mssqlUnsafeKeyword finds statements that end the guard transaction, run SQL
+// elsewhere, or change state outside a transaction. All are reserved words in
+// T-SQL, so a plain query only contains them quoted.
+var mssqlUnsafeKeyword = regexp.MustCompile(`(?i)\b(commit|rollback|exec|execute|kill|shutdown|reconfigure|dbcc|backup|restore|checkpoint|openquery|openrowset|opendatasource)\b|\bnext\s+value\s+for\b`)
+
+func mssqlUnsafe(query string) bool {
+	return mssqlUnsafeKeyword.MatchString(mssqlCode(query))
+}
+
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+const sqliteLimitAttached = 7
+
+// readGuard returns where to run reads that include user SQL. For a read-only
+// profile they run in a transaction that is always rolled back: PostgreSQL
+// rejects writes in a READ ONLY transaction and runs one statement per query,
+// SQLite opens the file read-only and cannot ATTACH it again writable, and
+// SQL Server batches that could escape the transaction are refused.
+func (s *Server) readGuard(ctx context.Context, db *sql.DB, profile Profile, userSQL ...string) (queryer, func(), error) {
+	if !profile.ReadOnly {
+		return db, func() {}, nil
+	}
+	if profile.Driver == "mssql" {
+		for _, text := range userSQL {
+			if mssqlUnsafe(text) {
+				return nil, nil, s.readOnlyError()
+			}
+		}
+	}
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if profile.Driver == "sqlite" {
+		if _, err := sqlite.Limit(conn, sqliteLimitAttached, 0); err != nil {
+			conn.Close()
+			return nil, nil, err
+		}
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: profile.Driver == "postgres"})
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	return tx, func() { tx.Rollback(); conn.Close() }, nil
+}
+
+func (s *Server) readOnlyError() *APIError {
+	if s.readOnly {
+		return &APIError{Code: "read_only", Message: "Changes are blocked in read-only mode; add --alter to allow them"}
+	}
+	return &APIError{Code: "read_only", Message: "This connection is read-only"}
+}
+
 func (s *Server) query(req Request) (any, error) {
 	p, err := decode[queryParams](req.Params)
 	if err != nil {
@@ -1262,8 +1397,23 @@ func (s *Server) query(req Request) (any, error) {
 	}
 	ctx, done := s.requestContext(req.ID, profile.TimeoutMS)
 	defer done()
-	if profile.ReadOnly && !readLooking(p.SQL) {
-		return nil, &APIError{Code: "read_only", Message: "This connection is read-only"}
+	if profile.ReadOnly {
+		// The first-word check gives a clear error early; readGuard is the
+		// real protection.
+		if !returnsRows(p.SQL) {
+			return nil, s.readOnlyError()
+		}
+		q, release, err := s.readGuard(ctx, db, profile, p.SQL)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		rows, err := q.QueryContext(ctx, p.SQL)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanResultSets(rows, p.Limit)
 	}
 	if returnsRows(p.SQL) {
 		rows, err := db.QueryContext(ctx, p.SQL)
@@ -1271,7 +1421,7 @@ func (s *Server) query(req Request) (any, error) {
 			return nil, err
 		}
 		defer rows.Close()
-		return scanResultSets(rows)
+		return scanResultSets(rows, p.Limit)
 	}
 	res, err := db.ExecContext(ctx, p.SQL)
 	if err != nil {

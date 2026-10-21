@@ -12,7 +12,8 @@ Each command is built for both `x86_64` and `arm64`:
 - `vime`: the slimmer editor
 - `vimi`: the Git diff viewer
 - `vimg`: the Git repository dashboard
-- `vimd`: the LazyData database viewer, with its `vimd-sql` helper
+- `vimd`: the LazyData database viewer, with its `vimd-sql` helper; also
+  installed as `agent-db` for AI agents
 
 These commands were previously named `nvima`, `lazydiff`, `lazyrepo`,
 `lazydata`, and `lazydata-sql`. `make install` and the release installer
@@ -105,7 +106,42 @@ Open the database viewer:
 ```sh
 vimd
 vimd --help
+vimd open prod            # read-only
+vimd open prod --alter    # allow row edits, deletes, and writes
 ```
+
+`vimd` (or its alias `agent-db`) also works as a plain command-line tool for
+scripts and AI agents. It prints data to stdout and errors to stderr, and exits with 0 on success, 1 on a
+connection or SQL error, and 2 on invalid usage:
+
+```sh
+vimd list                                   # saved connections, no passwords
+vimd test prod                              # check the connection
+vimd databases prod
+vimd tables prod
+vimd columns prod public.users
+vimd query prod "SELECT id, email FROM users"
+vimd query prod --json < report.sql         # SQL from stdin, JSON output
+vimd query prod --format csv "SELECT * FROM orders" > orders.csv
+vimd query prod --timeout 5m < slow-report.sql
+vimd query prod --alter "DELETE FROM sessions WHERE expired"
+vimd skills get core --full                 # usage guide for AI agents
+```
+
+Connections are matched by name, ignoring case. Use `-d <database>` to target
+another database, `--limit <rows>` to change the 1000-row default per result
+(`0` shows all rows), and `--timeout <time>` (`90s`, `5m`, or seconds) to
+override the saved timeout. `--format` prints `table` (default), `json`, `csv`
+(NULL is empty), or `tsv` (PostgreSQL COPY text, NULL is `\N`); `--no-header`
+drops the header row. With CSV and TSV, status lines go to stderr. Commands are read-only by default: a query that may change
+data fails unless `--alter` is given, and read-only queries run in a transaction
+that is always rolled back. Connections saved as read-only never allow changes.
+Connections hold passwords, so they are added and edited only in the viewer;
+the command line can list them but never shows passwords.
+
+`vimd skills` bundles usage guides for AI agents, in the same style as
+`agent-browser skills`: `vimd skills list` shows them and
+`vimd skills get core --full` prints the core guide with its references.
 
 LazyData supports PostgreSQL, SQL Server, and SQLite through its bundled
 `vimd-sql` helper. Connection profiles are managed at startup and stored with mode `0600`

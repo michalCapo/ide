@@ -1097,13 +1097,19 @@ function M.load_profiles(select_id)
       for i,p in ipairs(S.profiles)do if p.id==restore.profile_id then S.profile_index=i;found=true;break end end
       if found then S.restore=restore;connect_profile() end
     end
+    if S.open_name then
+      local name=S.open_name;S.open_name=nil
+      local database=vim.env.LAZYDATA_OPEN_DATABASE
+      for i,p in ipairs(S.profiles)do if p.id==name or p.name:lower()==name:lower() then S.profile_index=i;S.restore=database~="" and {database=database} or nil;render_profiles();connect_profile();return end end
+      notify("Connection not found: "..name,vim.log.levels.ERROR)
+    end
   end)
 end
 
 connect_profile = function()
   local p=selected_profile();if not p then return end
-  request("test",{profile_id=p.id,database=p.database},function(_,err)
-    if err then notify(backend_error(err),vim.log.levels.ERROR);return end
+  request("test",{profile_id=p.id,database=S.restore and S.restore.database or p.database},function(_,err)
+    if err then S.restore=nil;notify(backend_error(err),vim.log.levels.ERROR);return end
     S.profile=p;S.database=p.driver=="sqlite" and vim.fn.fnamemodify(p.path,":t") or (S.restore and S.restore.database or p.database);S.screen="workspace";S.active_panel="sidebar";M.apply_layout(true);M.load_tables()
   end,true)
 end
@@ -1113,8 +1119,8 @@ function M.load_tables()
   request("tables",{profile_id=S.profile.id,database=S.profile.driver=="sqlite" and "" or S.database},function(result,err)
     if err then notify(backend_error(err),vim.log.levels.ERROR);return end
     S.tables=result or {};S.table_index=1;render_tables();render_workspace()
-    if S.restore and S.restore.table then
-      local restore=S.restore;S.restore=nil
+    local restore=S.restore;S.restore=nil
+    if restore and restore.table then
       for i,t in ipairs(S.tables)do
         if t.name==restore.table and (t.schema or "")==(restore.schema or "") then S.table_index=i;render_tables();open_table(restore);break end
       end
@@ -1688,7 +1694,8 @@ function M.launch()
   configure(S.main.buf);configure(S.sidebar.buf);configure(S.result.buf)
   vim.api.nvim_create_autocmd("VimResized",{group=S.group,callback=function()vim.schedule(function()M.apply_layout(true)end)end})
   vim.api.nvim_create_autocmd("VimLeavePre",{group=S.group,once=true,callback=function()write_session();if S.job and S.job>0 then vim.fn.jobstop(S.job)end end})
-  S.restore=read_session()
+  S.open_name=vim.env.LAZYDATA_OPEN~="" and vim.env.LAZYDATA_OPEN or nil
+  S.restore=not S.open_name and read_session() or nil
   S.screen="profiles";S.active_panel="main";M.apply_layout(true);M.load_profiles()
 end
 

@@ -352,3 +352,22 @@ func TestProfileConnectionTestDoesNotCreateSQLiteFile(t *testing.T) {
 		t.Fatalf("connection test = %#v, %v", result, err)
 	}
 }
+
+func TestMSSQLUnsafe(t *testing.T) {
+	for query, want := range map[string]bool{
+		"SELECT 1; COMMIT; DELETE FROM t":                                                true,
+		"SELECT 1 ROLLBACK DELETE FROM t":                                                true,
+		"SELECT 1; EXEC('DELETE FROM t')":                                                true,
+		"select 1; execute sp_executesql N'x'":                                           true,
+		"SELECT NEXT VALUE FOR dbo.seq":                                                  true,
+		"SELECT 1; /* outer /* inner */ ' */ COMMIT TRANSACTION; -- '\nUPDATE t SET v=1": true,
+		"SELECT [commit], 'rollback' FROM t":                                             false,
+		"SELECT 1 -- commit\n/* exec /* nested */ kill */":                               false,
+		"SELECT \"exec\" FROM t WHERE a = 'it''s' AND [x]]exec] = 1":                     false,
+		"SELECT committed_at, next_value FROM t":                                         false,
+	} {
+		if got := mssqlUnsafe(query); got != want {
+			t.Errorf("mssqlUnsafe(%q) = %v, want %v", query, got, want)
+		}
+	}
+}
