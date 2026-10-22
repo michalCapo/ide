@@ -39,7 +39,7 @@ parsing when the SQL itself starts with `-`.
 - TSV uses PostgreSQL COPY text format: NULL is `\N`, and tabs, newlines, and
   backslashes are escaped.
 - JSON keeps native types: numbers stay numbers, NULL is `null`, timestamps are
-  RFC 3339 strings, and binary values are strings.
+  RFC 3339 strings, and binary values are hex strings like `0x89504E47`.
 - A statement that returns no rows (with `--alter`) prints
   `(N row(s) affected)`.
 

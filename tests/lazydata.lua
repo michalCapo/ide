@@ -46,6 +46,7 @@ assert(lazydata._value_filetype({ type = "jsonb" }, "not yet valid") == "json", 
 assert(lazydata._value_filetype({ type = "text" }, [[<?xml version="1.0"?><root/>]]) == "xml", "XML content was not detected")
 assert(lazydata._value_filetype({ name = "script.sh", type = "text" }, "echo hello") == "sh", "filename hint was not detected")
 assert(lazydata._value_filetype({ type = "text" }, "plain text") == "text", "plain text was misdetected")
+assert(lazydata._value_text("a\0b\r\nc") == "a b  c", "binary cell text was not made displayable")
 local formatted_json = assert(lazydata._format_value("json", [[{"data":{"id":6,"active":true},"skills":[]}]]))
 assert(formatted_json:find('\n  "data": {', 1, true), "JSON formatter did not indent an object")
 assert(formatted_json:find('\n    "id": 6,', 1, true), "JSON formatter did not indent nested fields")
@@ -59,6 +60,10 @@ FROM [sales].[order]]s]
 WHERE [company_ico] = 31678378
   AND [name] = N'O''Brien'
   AND [closed_at] IS NULL;]=],"filter query did not quote SQL Server identifiers and values safely: "..quoted_filter_query)
+for driver,literal in pairs({sqlite="X'89504E47'",postgres="'\\x89504E47'::bytea",mssql="0x89504E47"})do
+  local binary_query=lazydata._filter_query({profile={driver=driver},table="files",columns={{name="data",type=driver=="postgres"and"bytea"or"varbinary"},{name="note",type="text"}},predicates={{column="data",value="0x89504E47"},{column="note",value="0x41"}}})
+  assert(binary_query:find("= "..literal,1,true)and binary_query:find("'0x41'",1,true),"binary filter literal was wrong for "..driver..": "..binary_query)
+end
 lazydata.launch()
 local state = lazydata._state
 

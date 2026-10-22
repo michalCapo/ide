@@ -473,7 +473,7 @@ end
 local function value_text(value)
   if value == vim.NIL or value == nil then return "NULL" end
   local text = type(value) == "table" and vim.json.encode(value) or tostring(value)
-  text = text:gsub("[\r\n\t]", " ")
+  text = text:gsub("%c", " ")
   return vim.fn.strcharpart(text, 0, 32)
 end
 
@@ -531,11 +531,25 @@ local function sql_identifier(driver,value)
   return'"'..value:gsub('"','""')..'"'
 end
 
-local function sql_literal(driver,value)
+-- Matches the backend: SQLite BLOB affinity, PostgreSQL bytea, SQL Server binary types.
+local function binary_type(column_type)
+  if type(column_type)~="string"then return false end
+  local name=vim.trim((column_type:upper():gsub("%(.*$","")))
+  return name==""or name=="BYTEA"or name=="BINARY"or name=="VARBINARY"or name=="IMAGE"or name:find("BLOB",1,true)~=nil
+end
+
+local function sql_literal(driver,value,column_type)
   if value==vim.NIL or value==nil then return"NULL"end
   if type(value)=="boolean"then return driver=="postgres"and(value and"TRUE"or"FALSE")or(value and"1"or"0")end
   if type(value)=="number"then return tostring(value)end
   local text=type(value)=="table"and vim.json.encode(value)or tostring(value)
+  -- Binary values are shown as hex like 0x89504E47.
+  local hex=binary_type(column_type)and text:match("^0[xX](%x*)$")
+  if hex and #hex%2==0 then
+    if driver=="postgres"then return"'\\x"..hex.."'::bytea"end
+    if driver=="mssql"then return"0x"..hex end
+    return"X'"..hex.."'"
+  end
   return(driver=="mssql"and"N"or"").."'"..text:gsub("'","''").."'"
 end
 
@@ -544,6 +558,7 @@ local function filter_query(item)
   local target={}
   if item.schema and item.schema~=""then target[#target+1]=sql_identifier(driver,item.schema)end
   target[#target+1]=sql_identifier(driver,item.table)
+  local types={};for _,column in ipairs(item.columns or{})do types[column.name]=column.type end
   local conditions={}
   if item.raw_where and vim.trim(item.raw_where)~=""then conditions[#conditions+1]="("..vim.trim(item.raw_where)..")"end
   for _,predicate in ipairs(item.predicates or{})do
@@ -551,7 +566,7 @@ local function filter_query(item)
     if predicate.is_null or predicate.value==vim.NIL or predicate.value==nil then
       conditions[#conditions+1]=identifier.." IS NULL"
     else
-      conditions[#conditions+1]=identifier.." = "..sql_literal(driver,predicate.value)
+      conditions[#conditions+1]=identifier.." = "..sql_literal(driver,predicate.value,types[predicate.column])
     end
   end
   local lines={"SELECT *","FROM "..table.concat(target,".")}
@@ -1195,7 +1210,9 @@ end
 
 local function copy_lines(lines,label)
   if #lines==0 then return end
-  vim.fn.setreg("+",table.concat(lines,"\n"))
+  -- Registers store NUL as "\n" inside a line, so binary values copy without E976.
+  local register={};for _,line in ipairs(vim.split(table.concat(lines,"\n"),"\n",{plain=true}))do register[#register+1]=(line:gsub("%z","\n"))end
+  vim.fn.setreg("+",register,"c")
   vim.notify(label or(#lines==1 and"Copied line to clipboard"or string.format("Copied %d rows to clipboard",#lines)),vim.log.levels.INFO)
 end
 
@@ -1543,7 +1560,7 @@ local function format_value(filetype,text)
   if filetype=="xml"then return pretty_xml(text)end
   local commands={yaml={"yamlfmt","-"},toml={"taplo","format","-"},sql={"sqlformat","-"},lua={"stylua","-"},sh={"shfmt"},bash={"shfmt"}}
   local command=commands[filetype]
-  if command and vim.fn.executable(command[1])==1 then local output=vim.fn.system(command,text);if vim.v.shell_error==0 then return output:gsub("\n$","")end;return nil,vim.trim(output)end
+  if command and vim.fn.executable(command[1])==1 then local result=vim.system(command,{stdin=text}):wait();if result.code==0 then return(result.stdout:gsub("\n$",""))end;return nil,vim.trim(result.stderr~=""and result.stderr or result.stdout)end
   return nil,"No formatter available for "..filetype
 end
 

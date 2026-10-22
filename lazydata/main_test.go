@@ -56,9 +56,9 @@ func TestSQLHelpers(t *testing.T) {
 	if got := quoteIdent("mssql", "a]b"); got != "[a]]b]" {
 		t.Fatalf("quoted identifier = %q", got)
 	}
-	where, args := whereClause("postgres", "active", []Predicate{{Column: "team", Value: "core"}, {Column: "gone", IsNull: true}})
-	if where != ` WHERE (active) AND "team" = $1 AND "gone" IS NULL` || len(args) != 1 {
-		t.Fatalf("where = %q, args = %#v", where, args)
+	where, args, err := whereClause("postgres", "active", []Predicate{{Column: "team", Value: "core"}, {Column: "gone", IsNull: true}}, nil)
+	if err != nil || where != ` WHERE (active) AND "team" = $1 AND "gone" IS NULL` || len(args) != 1 {
+		t.Fatalf("where = %q, args = %#v, err = %v", where, args, err)
 	}
 	if !readLooking("-- note\n SELECT 1") || readLooking("DELETE FROM users") || readLooking("WITH x AS (SELECT 1) SELECT * FROM x") || !returnsRows("WITH x AS (SELECT 1) SELECT * FROM x") {
 		t.Fatal("query classification failed")
@@ -369,5 +369,66 @@ func TestMSSQLUnsafe(t *testing.T) {
 		if got := mssqlUnsafe(query); got != want {
 			t.Errorf("mssqlUnsafe(%q) = %v, want %v", query, got, want)
 		}
+	}
+}
+
+func TestSQLiteBinaryValuesRoundTripAsHex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "binary.db")
+	if err := os.WriteFile(dbPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	testBinaryRoundTrip(t, Profile{Name: "Local", Driver: "sqlite", Path: dbPath}, "", `CREATE TABLE files (id BLOB PRIMARY KEY, data BLOB, note TEXT);
+INSERT INTO files VALUES (X'00FF', X'89504E47', 'png'), (X'01', X'00', 'nul')`)
+}
+
+// testBinaryRoundTrip expects a files table with rows (0x00FF, 0x89504E47,
+// png) and (0x01, 0x00, nul).
+func testBinaryRoundTrip(t *testing.T, profile Profile, schema, setup string) {
+	t.Helper()
+	s := testServer(t)
+	p, err := s.saveProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method string, params any) (any, error) {
+		t.Helper()
+		return s.handle(Request{ID: method, Method: method, Params: raw(t, params)})
+	}
+	if _, err := call("query", queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: setup}); err != nil {
+		t.Fatal(err)
+	}
+	object := objectParams{ProfileID: p.ID, Schema: schema, Table: "files"}
+	rows := func(predicates ...Predicate) [][]any {
+		t.Helper()
+		value, err := call("rows", rowsParams{objectParams: object, Predicates: predicates})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value.(ResultSet).Rows
+	}
+	if got := rows(); len(got) != 2 || got[0][0] != "0x00FF" || got[0][1] != "0x89504E47" || got[1][1] != "0x00" {
+		t.Fatalf("rows = %#v", got)
+	}
+	if got := rows(Predicate{Column: "data", Value: "0x89504e47"}); len(got) != 1 || got[0][2] != "png" {
+		t.Fatalf("filtered rows = %#v", got)
+	}
+	value, err := call("distinct", distinctParams{rowsParams: rowsParams{objectParams: object, Predicates: []Predicate{{Column: "id", Value: "0x00FF"}}}, Column: "data"})
+	if distinct, _ := value.([]map[string]any); err != nil || len(distinct) != 1 || distinct[0]["value"] != "0x89504E47" {
+		t.Fatalf("distinct = %#v, %v", value, err)
+	}
+	if _, err := call("update_rows", updateRowsParams{objectParams: object, Rows: []rowUpdate{{Key: map[string]any{"id": "0x00FF"}, Changes: map[string]any{"data": "0x0102"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rows(Predicate{Column: "data", Value: "0x0102"}); len(got) != 1 || got[0][0] != "0x00FF" {
+		t.Fatalf("updated rows = %#v", got)
+	}
+	if _, err := call("update_rows", updateRowsParams{objectParams: object, Rows: []rowUpdate{{Key: map[string]any{"id": "0x01"}, Changes: map[string]any{"data": "not hex"}}}}); err == nil || !strings.Contains(err.Error(), "hex") {
+		t.Fatalf("invalid hex error = %v", err)
+	}
+	if _, err := call("delete_rows", deleteRowsParams{objectParams: object, Rows: []map[string]any{{"id": "0x01"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rows(); len(got) != 1 {
+		t.Fatalf("rows after delete = %#v", got)
 	}
 }

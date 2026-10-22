@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/microsoft/go-mssqldb"
@@ -798,7 +800,8 @@ func placeholder(driver string, n int) string {
 	return "?"
 }
 
-func whereClause(driver string, raw string, predicates []Predicate) (string, []any) {
+func whereClause(driver string, raw string, predicates []Predicate, columns []Column) (string, []any, error) {
+	types := columnTypes(columns)
 	parts, args := []string{}, []any{}
 	if strings.TrimSpace(raw) != "" {
 		parts = append(parts, "("+strings.TrimSpace(raw)+")")
@@ -808,14 +811,18 @@ func whereClause(driver string, raw string, predicates []Predicate) (string, []a
 		if p.IsNull || p.Value == nil {
 			parts = append(parts, id+" IS NULL")
 		} else {
-			args = append(args, p.Value)
+			value, err := bindValue(p.Column, types[p.Column], p.Value)
+			if err != nil {
+				return "", nil, err
+			}
+			args = append(args, value)
 			parts = append(parts, id+" = "+placeholder(driver, len(args)))
 		}
 	}
 	if len(parts) == 0 {
-		return "", args
+		return "", args, nil
 	}
-	return " WHERE " + strings.Join(parts, " AND "), args
+	return " WHERE " + strings.Join(parts, " AND "), args, nil
 }
 
 type rowsParams struct {
@@ -841,6 +848,10 @@ func scanRows(rows *sql.Rows, limit int) (ResultSet, error) {
 	if err != nil {
 		return ResultSet{}, err
 	}
+	types, err := rows.ColumnTypes()
+	if err != nil {
+		return ResultSet{}, err
+	}
 	result := ResultSet{Columns: cols, Rows: [][]any{}}
 	for rows.Next() {
 		raw := make([]any, len(cols))
@@ -852,7 +863,7 @@ func scanRows(rows *sql.Rows, limit int) (ResultSet, error) {
 			return result, err
 		}
 		for i := range raw {
-			raw[i] = normalize(raw[i])
+			raw[i] = normalizeColumn(types[i].DatabaseTypeName(), raw[i])
 		}
 		result.Rows = append(result.Rows, raw)
 		if limit > 0 && len(result.Rows) >= limit {
@@ -889,12 +900,69 @@ func scanResultSets(rows *sql.Rows, limit int) ([]ResultSet, error) {
 func normalize(v any) any {
 	switch x := v.(type) {
 	case []byte:
+		if !utf8.Valid(x) {
+			return binaryText(x)
+		}
 		return string(x)
 	case time.Time:
 		return x.Format(time.RFC3339Nano)
 	default:
 		return x
 	}
+}
+
+// normalizeColumn shows values of binary columns as hex.
+func normalizeColumn(typeName string, v any) any {
+	if b, ok := v.([]byte); ok && isBinaryType(typeName) {
+		return binaryText(b)
+	}
+	return normalize(v)
+}
+
+// isBinaryType reports SQLite BLOB affinity (BLOB or no declared type),
+// PostgreSQL bytea, and SQL Server binary types.
+func isBinaryType(typeName string) bool {
+	name := strings.ToUpper(strings.TrimSpace(typeName))
+	if i := strings.IndexByte(name, '('); i >= 0 {
+		name = strings.TrimSpace(name[:i])
+	}
+	switch name {
+	case "", "BYTEA", "BINARY", "VARBINARY", "IMAGE":
+		return true
+	}
+	return strings.Contains(name, "BLOB")
+}
+
+// binaryText shows bytes as hex, like 0x89504E47.
+func binaryText(b []byte) string {
+	return "0x" + strings.ToUpper(hex.EncodeToString(b))
+}
+
+func columnTypes(columns []Column) map[string]string {
+	types := make(map[string]string, len(columns))
+	for _, c := range columns {
+		types[c.Name] = c.Type
+	}
+	return types
+}
+
+// bindValue turns hex text such as 0x89504E47 back into bytes for a binary
+// column, so filters, keys, and edits match the stored value.
+func bindValue(column, typeName string, value any) (any, error) {
+	text, ok := value.(string)
+	if !ok || !isBinaryType(typeName) {
+		return value, nil
+	}
+	if strings.HasPrefix(text, "0x") || strings.HasPrefix(text, "0X") {
+		if b, err := hex.DecodeString(text[2:]); err == nil {
+			return b, nil
+		}
+	}
+	if strings.TrimSpace(typeName) == "" {
+		// An untyped SQLite column can hold text too.
+		return value, nil
+	}
+	return nil, &APIError{Code: "invalid_binary", Message: "Column " + column + " needs a hex value like 0x89504E47"}
 }
 
 func (s *Server) rows(req Request) (any, error) {
@@ -951,7 +1019,10 @@ func (s *Server) rows(req Request) (any, error) {
 	if len(orderParts) > 0 {
 		order = " ORDER BY " + strings.Join(orderParts, ",")
 	}
-	where, args := whereClause(profile.Driver, p.RawWhere, p.Predicates)
+	where, args, err := whereClause(profile.Driver, p.RawWhere, p.Predicates, cols)
+	if err != nil {
+		return nil, err
+	}
 	table := qualified(profile.Driver, p.Schema, p.Table)
 	selected := make([]string, 0, len(cols))
 	for _, column := range cols {
@@ -1044,6 +1115,10 @@ func (s *Server) deleteRows(req Request) (any, error) {
 			if value == nil {
 				parts = append(parts, quoteIdent(profile.Driver, column.Name)+" IS NULL")
 				continue
+			}
+			value, err := bindValue(column.Name, column.Type, value)
+			if err != nil {
+				return nil, err
 			}
 			args = append(args, value)
 			parts = append(parts, quoteIdent(profile.Driver, column.Name)+" = "+placeholder(profile.Driver, len(args)))
@@ -1139,13 +1214,17 @@ func (s *Server) updateRows(req Request) (any, error) {
 			if !changed {
 				continue
 			}
+			value, err := bindValue(column.Name, column.Type, value)
+			if err != nil {
+				return nil, err
+			}
 			args = append(args, value)
 			valueExpression := placeholder(profile.Driver, len(args))
 			// Values edited in the UI arrive as text. An explicit text-to-column
 			// cast lets PostgreSQL parse integers, timestamps, arrays, enums, and
 			// other native types instead of asking the driver to encode a string
 			// directly as the inferred binary type.
-			if profile.Driver == "postgres" {
+			if _, binary := value.([]byte); profile.Driver == "postgres" && !binary {
 				valueExpression = "CAST(CAST(" + valueExpression + " AS text) AS " + column.Type + ")"
 			}
 			setParts = append(setParts, quoteIdent(profile.Driver, column.Name)+" = "+valueExpression)
@@ -1158,6 +1237,10 @@ func (s *Server) updateRows(req Request) (any, error) {
 			if value == nil {
 				whereParts = append(whereParts, quoteIdent(profile.Driver, column.Name)+" IS NULL")
 				continue
+			}
+			value, err := bindValue(column.Name, column.Type, value)
+			if err != nil {
+				return nil, err
 			}
 			args = append(args, value)
 			whereParts = append(whereParts, quoteIdent(profile.Driver, column.Name)+" = "+placeholder(profile.Driver, len(args)))
@@ -1203,7 +1286,14 @@ func (s *Server) distinct(req Request) (any, error) {
 		return nil, err
 	}
 	defer release()
-	where, args := whereClause(profile.Driver, p.RawWhere, p.Predicates)
+	cols, err := s.columnsFor(ctx, q, profile, p.objectParams)
+	if err != nil {
+		return nil, err
+	}
+	where, args, err := whereClause(profile.Driver, p.RawWhere, p.Predicates, cols)
+	if err != nil {
+		return nil, err
+	}
 	col := quoteIdent(profile.Driver, p.Column)
 	if p.Search != "" {
 		search := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(p.Search)
@@ -1235,6 +1325,7 @@ func (s *Server) distinct(req Request) (any, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	typeName := columnTypes(cols)[p.Column]
 	result := []map[string]any{}
 	for rows.Next() {
 		var value any
@@ -1242,7 +1333,7 @@ func (s *Server) distinct(req Request) (any, error) {
 		if err := rows.Scan(&value, &count); err != nil {
 			return nil, err
 		}
-		result = append(result, map[string]any{"value": normalize(value), "is_null": value == nil, "count": count})
+		result = append(result, map[string]any{"value": normalizeColumn(typeName, value), "is_null": value == nil, "count": count})
 	}
 	return result, rows.Err()
 }
