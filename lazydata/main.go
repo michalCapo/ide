@@ -21,7 +21,7 @@ import (
 	"unicode/utf8"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/microsoft/go-mssqldb"
+	mssql "github.com/microsoft/go-mssqldb"
 	"modernc.org/sqlite"
 )
 
@@ -800,8 +800,7 @@ func placeholder(driver string, n int) string {
 	return "?"
 }
 
-func whereClause(driver string, raw string, predicates []Predicate, columns []Column) (string, []any, error) {
-	types := columnTypes(columns)
+func whereClause(driver string, raw string, predicates []Predicate) (string, []any, error) {
 	parts, args := []string{}, []any{}
 	if strings.TrimSpace(raw) != "" {
 		parts = append(parts, "("+strings.TrimSpace(raw)+")")
@@ -811,7 +810,7 @@ func whereClause(driver string, raw string, predicates []Predicate, columns []Co
 		if p.IsNull || p.Value == nil {
 			parts = append(parts, id+" IS NULL")
 		} else {
-			value, err := bindValue(p.Column, types[p.Column], p.Value)
+			value, err := bindValue(p.Value)
 			if err != nil {
 				return "", nil, err
 			}
@@ -901,7 +900,7 @@ func normalize(v any) any {
 	switch x := v.(type) {
 	case []byte:
 		if !utf8.Valid(x) {
-			return binaryText(x)
+			return binaryValue(x)
 		}
 		return string(x)
 	case time.Time:
@@ -911,46 +910,43 @@ func normalize(v any) any {
 	}
 }
 
-// normalizeColumn shows values of binary columns as hex.
+// normalizeColumn marks values of binary columns as binary and shows SQL
+// Server GUIDs in their usual text form.
 func normalizeColumn(typeName string, v any) any {
-	if b, ok := v.([]byte); ok && isBinaryType(typeName) {
-		return binaryText(b)
+	if b, ok := v.([]byte); ok {
+		switch name := strings.ToUpper(typeName); {
+		case name == "UNIQUEIDENTIFIER":
+			var id mssql.UniqueIdentifier
+			if id.Scan(b) == nil {
+				return id.String()
+			}
+		case name == "" || name == "BYTEA" || name == "BINARY" || name == "VARBINARY" || name == "IMAGE" || strings.Contains(name, "BLOB"):
+			return binaryValue(b)
+		}
 	}
 	return normalize(v)
 }
 
-// isBinaryType reports SQLite BLOB affinity (BLOB or no declared type),
-// PostgreSQL bytea, and SQL Server binary types.
-func isBinaryType(typeName string) bool {
-	name := strings.ToUpper(strings.TrimSpace(typeName))
-	if i := strings.IndexByte(name, '('); i >= 0 {
-		name = strings.TrimSpace(name[:i])
-	}
-	switch name {
-	case "", "BYTEA", "BINARY", "VARBINARY", "IMAGE":
-		return true
-	}
-	return strings.Contains(name, "BLOB")
-}
+// binaryValue travels as {"$binary":"0x89504E47"}, so binary data is never
+// mistaken for text that only looks like hex.
+type binaryValue []byte
 
-// binaryText shows bytes as hex, like 0x89504E47.
-func binaryText(b []byte) string {
+func (b binaryValue) String() string {
 	return "0x" + strings.ToUpper(hex.EncodeToString(b))
 }
 
-func columnTypes(columns []Column) map[string]string {
-	types := make(map[string]string, len(columns))
-	for _, c := range columns {
-		types[c.Name] = c.Type
-	}
-	return types
+func (b binaryValue) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]string{"$binary": b.String()})
 }
 
-// bindValue turns hex text such as 0x89504E47 back into bytes for a binary
-// column, so filters, keys, and edits match the stored value.
-func bindValue(column, typeName string, value any) (any, error) {
-	text, ok := value.(string)
-	if !ok || !isBinaryType(typeName) {
+// bindValue turns a {"$binary":"0x..."} value from the viewer back into bytes.
+func bindValue(value any) (any, error) {
+	tagged, ok := value.(map[string]any)
+	if !ok {
+		return value, nil
+	}
+	text, ok := tagged["$binary"].(string)
+	if !ok || len(tagged) != 1 {
 		return value, nil
 	}
 	if strings.HasPrefix(text, "0x") || strings.HasPrefix(text, "0X") {
@@ -958,11 +954,7 @@ func bindValue(column, typeName string, value any) (any, error) {
 			return b, nil
 		}
 	}
-	if strings.TrimSpace(typeName) == "" {
-		// An untyped SQLite column can hold text too.
-		return value, nil
-	}
-	return nil, &APIError{Code: "invalid_binary", Message: "Column " + column + " needs a hex value like 0x89504E47"}
+	return nil, &APIError{Code: "invalid_binary", Message: "Binary values must be hex like 0x89504E47"}
 }
 
 func (s *Server) rows(req Request) (any, error) {
@@ -1019,7 +1011,7 @@ func (s *Server) rows(req Request) (any, error) {
 	if len(orderParts) > 0 {
 		order = " ORDER BY " + strings.Join(orderParts, ",")
 	}
-	where, args, err := whereClause(profile.Driver, p.RawWhere, p.Predicates, cols)
+	where, args, err := whereClause(profile.Driver, p.RawWhere, p.Predicates)
 	if err != nil {
 		return nil, err
 	}
@@ -1116,7 +1108,7 @@ func (s *Server) deleteRows(req Request) (any, error) {
 				parts = append(parts, quoteIdent(profile.Driver, column.Name)+" IS NULL")
 				continue
 			}
-			value, err := bindValue(column.Name, column.Type, value)
+			value, err := bindValue(value)
 			if err != nil {
 				return nil, err
 			}
@@ -1214,7 +1206,7 @@ func (s *Server) updateRows(req Request) (any, error) {
 			if !changed {
 				continue
 			}
-			value, err := bindValue(column.Name, column.Type, value)
+			value, err := bindValue(value)
 			if err != nil {
 				return nil, err
 			}
@@ -1238,7 +1230,7 @@ func (s *Server) updateRows(req Request) (any, error) {
 				whereParts = append(whereParts, quoteIdent(profile.Driver, column.Name)+" IS NULL")
 				continue
 			}
-			value, err := bindValue(column.Name, column.Type, value)
+			value, err := bindValue(value)
 			if err != nil {
 				return nil, err
 			}
@@ -1286,11 +1278,7 @@ func (s *Server) distinct(req Request) (any, error) {
 		return nil, err
 	}
 	defer release()
-	cols, err := s.columnsFor(ctx, q, profile, p.objectParams)
-	if err != nil {
-		return nil, err
-	}
-	where, args, err := whereClause(profile.Driver, p.RawWhere, p.Predicates, cols)
+	where, args, err := whereClause(profile.Driver, p.RawWhere, p.Predicates)
 	if err != nil {
 		return nil, err
 	}
@@ -1303,6 +1291,17 @@ func (s *Server) distinct(req Request) (any, error) {
 			match = "CAST(" + col + " AS TEXT) ILIKE " + placeholder(profile.Driver, len(args)) + " ESCAPE '\\'"
 		} else if profile.Driver == "mssql" {
 			match = "LOWER(CAST(" + col + " AS NVARCHAR(MAX))) LIKE LOWER(" + placeholder(profile.Driver, len(args)) + ") ESCAPE '\\'"
+		}
+		// Binary values are shown as hex, so search their hex form too.
+		if digits := strings.TrimPrefix(strings.ToUpper(p.Search), "0X"); digits != "" && strings.Trim(digits, "0123456789ABCDEF") == "" {
+			args = append(args, "%"+digits+"%")
+			hexMatch := "(typeof(" + col + ") = 'blob' AND hex(" + col + ") LIKE " + placeholder(profile.Driver, len(args)) + ")"
+			if profile.Driver == "postgres" {
+				hexMatch = "CAST(" + col + " AS TEXT) ILIKE " + placeholder(profile.Driver, len(args))
+			} else if profile.Driver == "mssql" {
+				hexMatch = "CONVERT(VARCHAR(MAX), " + col + ", 2) LIKE " + placeholder(profile.Driver, len(args))
+			}
+			match = "(" + match + " OR " + hexMatch + ")"
 		}
 		if strings.Contains("null", strings.ToLower(p.Search)) {
 			match = "(" + match + " OR " + col + " IS NULL)"
@@ -1325,7 +1324,10 @@ func (s *Server) distinct(req Request) (any, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	typeName := columnTypes(cols)[p.Column]
+	types, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
 	result := []map[string]any{}
 	for rows.Next() {
 		var value any
@@ -1333,7 +1335,7 @@ func (s *Server) distinct(req Request) (any, error) {
 		if err := rows.Scan(&value, &count); err != nil {
 			return nil, err
 		}
-		result = append(result, map[string]any{"value": normalizeColumn(typeName, value), "is_null": value == nil, "count": count})
+		result = append(result, map[string]any{"value": normalizeColumn(types[0].DatabaseTypeName(), value), "is_null": value == nil, "count": count})
 	}
 	return result, rows.Err()
 }

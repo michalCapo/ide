@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestSQLHelpers(t *testing.T) {
 	if got := quoteIdent("mssql", "a]b"); got != "[a]]b]" {
 		t.Fatalf("quoted identifier = %q", got)
 	}
-	where, args, err := whereClause("postgres", "active", []Predicate{{Column: "team", Value: "core"}, {Column: "gone", IsNull: true}}, nil)
+	where, args, err := whereClause("postgres", "active", []Predicate{{Column: "team", Value: "core"}, {Column: "gone", IsNull: true}})
 	if err != nil || where != ` WHERE (active) AND "team" = $1 AND "gone" IS NULL` || len(args) != 1 {
 		t.Fatalf("where = %q, args = %#v, err = %v", where, args, err)
 	}
@@ -377,13 +378,23 @@ func TestSQLiteBinaryValuesRoundTripAsHex(t *testing.T) {
 	if err := os.WriteFile(dbPath, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	testBinaryRoundTrip(t, Profile{Name: "Local", Driver: "sqlite", Path: dbPath}, "", `CREATE TABLE files (id BLOB PRIMARY KEY, data BLOB, note TEXT);
-INSERT INTO files VALUES (X'00FF', X'89504E47', 'png'), (X'01', X'00', 'nul')`)
+	// The text row looks like hex and the BLOB column also holds text; neither
+	// may be mistaken for binary.
+	s, object := testBinaryRoundTrip(t, Profile{Name: "Local", Driver: "sqlite", Path: dbPath}, "", `CREATE TABLE files (id PRIMARY KEY, data BLOB, note TEXT);
+INSERT INTO files VALUES (X'00FF', X'89504E47', 'png'), (X'01', X'00', 'nul'), ('0x00FF', 'hello', 'text')`)
+	if _, err := s.handle(Request{ID: "update", Method: "update_rows", Params: raw(t, updateRowsParams{objectParams: object, Rows: []rowUpdate{{Key: map[string]any{"id": "0x00FF"}, Changes: map[string]any{"note": "still text"}}}})}); err != nil {
+		t.Fatal(err)
+	}
+	value, err := s.handle(Request{ID: "rows", Method: "rows", Params: raw(t, rowsParams{objectParams: object, Predicates: []Predicate{{Column: "data", Value: "hello"}}})})
+	if got := value.(ResultSet).Rows; err != nil || len(got) != 1 || got[0][2] != "still text" {
+		t.Fatalf("text row = %#v, %v", value, err)
+	}
 }
 
 // testBinaryRoundTrip expects a files table with rows (0x00FF, 0x89504E47,
-// png) and (0x01, 0x00, nul).
-func testBinaryRoundTrip(t *testing.T, profile Profile, schema, setup string) {
+// png) and (0x01, 0x00, nul), and checks reading, filtering, searching,
+// updating, and deleting by binary values.
+func testBinaryRoundTrip(t *testing.T, profile Profile, schema, setup string) (*Server, objectParams) {
 	t.Helper()
 	s := testServer(t)
 	p, err := s.saveProfile(profile)
@@ -392,43 +403,56 @@ func testBinaryRoundTrip(t *testing.T, profile Profile, schema, setup string) {
 	}
 	call := func(method string, params any) (any, error) {
 		t.Helper()
-		return s.handle(Request{ID: method, Method: method, Params: raw(t, params)})
+		// Round-trip through JSON like the viewer does.
+		value, err := s.handle(Request{ID: method, Method: method, Params: raw(t, params)})
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded any
+		return decoded, json.Unmarshal(encoded, &decoded)
 	}
+	bin := func(hex string) map[string]any { return map[string]any{"$binary": hex} }
 	if _, err := call("query", queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: setup}); err != nil {
 		t.Fatal(err)
 	}
 	object := objectParams{ProfileID: p.ID, Schema: schema, Table: "files"}
-	rows := func(predicates ...Predicate) [][]any {
+	rows := func(predicates ...Predicate) []any {
 		t.Helper()
 		value, err := call("rows", rowsParams{objectParams: object, Predicates: predicates})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return value.(ResultSet).Rows
+		return value.(map[string]any)["rows"].([]any)
 	}
-	if got := rows(); len(got) != 2 || got[0][0] != "0x00FF" || got[0][1] != "0x89504E47" || got[1][1] != "0x00" {
+	cell := func(row any, i int) any { return row.([]any)[i] }
+	if got := rows(Predicate{Column: "note", Value: "png"}); len(got) != 1 || !reflect.DeepEqual(cell(got[0], 0), bin("0x00FF")) || !reflect.DeepEqual(cell(got[0], 1), bin("0x89504E47")) {
 		t.Fatalf("rows = %#v", got)
 	}
-	if got := rows(Predicate{Column: "data", Value: "0x89504e47"}); len(got) != 1 || got[0][2] != "png" {
+	if got := rows(Predicate{Column: "data", Value: bin("0x89504e47")}); len(got) != 1 || cell(got[0], 2) != "png" {
 		t.Fatalf("filtered rows = %#v", got)
 	}
-	value, err := call("distinct", distinctParams{rowsParams: rowsParams{objectParams: object, Predicates: []Predicate{{Column: "id", Value: "0x00FF"}}}, Column: "data"})
-	if distinct, _ := value.([]map[string]any); err != nil || len(distinct) != 1 || distinct[0]["value"] != "0x89504E47" {
+	value, err := call("distinct", distinctParams{rowsParams: rowsParams{objectParams: object}, Column: "data", Search: "0x504e"})
+	if distinct, _ := value.([]any); err != nil || len(distinct) != 1 || !reflect.DeepEqual(distinct[0].(map[string]any)["value"], bin("0x89504E47")) {
 		t.Fatalf("distinct = %#v, %v", value, err)
 	}
-	if _, err := call("update_rows", updateRowsParams{objectParams: object, Rows: []rowUpdate{{Key: map[string]any{"id": "0x00FF"}, Changes: map[string]any{"data": "0x0102"}}}}); err != nil {
+	if _, err := call("update_rows", updateRowsParams{objectParams: object, Rows: []rowUpdate{{Key: map[string]any{"id": bin("0x00FF")}, Changes: map[string]any{"data": bin("0x0102")}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := rows(Predicate{Column: "data", Value: "0x0102"}); len(got) != 1 || got[0][0] != "0x00FF" {
+	if got := rows(Predicate{Column: "data", Value: bin("0x0102")}); len(got) != 1 || cell(got[0], 2) != "png" {
 		t.Fatalf("updated rows = %#v", got)
 	}
-	if _, err := call("update_rows", updateRowsParams{objectParams: object, Rows: []rowUpdate{{Key: map[string]any{"id": "0x01"}, Changes: map[string]any{"data": "not hex"}}}}); err == nil || !strings.Contains(err.Error(), "hex") {
+	if _, err := call("update_rows", updateRowsParams{objectParams: object, Rows: []rowUpdate{{Key: map[string]any{"id": bin("0x01")}, Changes: map[string]any{"data": bin("not hex")}}}}); err == nil || !strings.Contains(err.Error(), "hex") {
 		t.Fatalf("invalid hex error = %v", err)
 	}
-	if _, err := call("delete_rows", deleteRowsParams{objectParams: object, Rows: []map[string]any{{"id": "0x01"}}}); err != nil {
+	if _, err := call("delete_rows", deleteRowsParams{objectParams: object, Rows: []map[string]any{{"id": bin("0x01")}}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := rows(); len(got) != 1 {
+	if got := rows(Predicate{Column: "note", Value: "nul"}); len(got) != 0 {
 		t.Fatalf("rows after delete = %#v", got)
 	}
+	return s, object
 }

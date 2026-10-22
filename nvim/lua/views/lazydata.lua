@@ -470,9 +470,19 @@ local function render_tables()
   decorate()
 end
 
+-- The backend sends binary values as {"$binary":"0x89504E47"}.
+local function binary_hex(value)
+  return type(value) == "table" and type(value["$binary"]) == "string" and value["$binary"] or nil
+end
+
+local function cell_text(value)
+  if type(value) == "table" then return binary_hex(value) or vim.json.encode(value) end
+  return tostring(value)
+end
+
 local function value_text(value)
   if value == vim.NIL or value == nil then return "NULL" end
-  local text = type(value) == "table" and vim.json.encode(value) or tostring(value)
+  local text = cell_text(value)
   text = text:gsub("%c", " ")
   return vim.fn.strcharpart(text, 0, 32)
 end
@@ -531,25 +541,17 @@ local function sql_identifier(driver,value)
   return'"'..value:gsub('"','""')..'"'
 end
 
--- Matches the backend: SQLite BLOB affinity, PostgreSQL bytea, SQL Server binary types.
-local function binary_type(column_type)
-  if type(column_type)~="string"then return false end
-  local name=vim.trim((column_type:upper():gsub("%(.*$","")))
-  return name==""or name=="BYTEA"or name=="BINARY"or name=="VARBINARY"or name=="IMAGE"or name:find("BLOB",1,true)~=nil
-end
-
-local function sql_literal(driver,value,column_type)
+local function sql_literal(driver,value)
   if value==vim.NIL or value==nil then return"NULL"end
   if type(value)=="boolean"then return driver=="postgres"and(value and"TRUE"or"FALSE")or(value and"1"or"0")end
   if type(value)=="number"then return tostring(value)end
-  local text=type(value)=="table"and vim.json.encode(value)or tostring(value)
-  -- Binary values are shown as hex like 0x89504E47.
-  local hex=binary_type(column_type)and text:match("^0[xX](%x*)$")
+  local hex=(binary_hex(value)or""):match("^0[xX](%x*)$")
   if hex and #hex%2==0 then
     if driver=="postgres"then return"'\\x"..hex.."'::bytea"end
     if driver=="mssql"then return"0x"..hex end
     return"X'"..hex.."'"
   end
+  local text=cell_text(value)
   return(driver=="mssql"and"N"or"").."'"..text:gsub("'","''").."'"
 end
 
@@ -558,7 +560,6 @@ local function filter_query(item)
   local target={}
   if item.schema and item.schema~=""then target[#target+1]=sql_identifier(driver,item.schema)end
   target[#target+1]=sql_identifier(driver,item.table)
-  local types={};for _,column in ipairs(item.columns or{})do types[column.name]=column.type end
   local conditions={}
   if item.raw_where and vim.trim(item.raw_where)~=""then conditions[#conditions+1]="("..vim.trim(item.raw_where)..")"end
   for _,predicate in ipairs(item.predicates or{})do
@@ -566,7 +567,7 @@ local function filter_query(item)
     if predicate.is_null or predicate.value==vim.NIL or predicate.value==nil then
       conditions[#conditions+1]=identifier.." IS NULL"
     else
-      conditions[#conditions+1]=identifier.." = "..sql_literal(driver,predicate.value,types[predicate.column])
+      conditions[#conditions+1]=identifier.." = "..sql_literal(driver,predicate.value)
     end
   end
   local lines={"SELECT *","FROM "..table.concat(target,".")}
@@ -1218,14 +1219,14 @@ end
 
 local function clipboard_value(value)
   if value==vim.NIL or value==nil then return"NULL"end
-  local text=type(value)=="table"and vim.json.encode(value)or tostring(value)
+  local text=cell_text(value)
   if text:find('[\t\r\n"]')then text='"'..text:gsub('"','""')..'"'end
   return text
 end
 
 local function clipboard_field(value)
   if value==vim.NIL or value==nil then return"NULL"end
-  return type(value)=="table"and vim.json.encode(value)or tostring(value)
+  return cell_text(value)
 end
 
 local function clipboard_row(row)
@@ -1319,7 +1320,10 @@ local function stage_cell_editor(editor,as_null)
   item.pending_updates=item.pending_updates or{}
   for _,target in ipairs(editor.targets)do
     local edit=item.pending_updates[target.identity]or{key=vim.deepcopy(target.key),changes={}}
-    if vim.deep_equal(value,target.original)then edit.changes[editor.column.name]=nil else edit.changes[editor.column.name]=value end
+    local stored=value
+    -- Hex typed into a binary cell, or into an empty cell of a binary column, is saved as bytes.
+    if type(value)=="string"and(binary_hex(target.original)or(target.original==vim.NIL and editor.binary and value:match("^0[xX]%x*$")))then stored={["$binary"]=value}end
+    if vim.deep_equal(stored,target.original)then edit.changes[editor.column.name]=nil else edit.changes[editor.column.name]=stored end
     if vim.tbl_isempty(edit.changes)then item.pending_updates[target.identity]=nil else item.pending_updates[target.identity]=edit end
   end
   close_cell_editor(editor)
@@ -1356,8 +1360,10 @@ edit_table_cells = function()
     end
   end
   local text
-  if value==vim.NIL or value==nil then text=""elseif type(value)=="table"then text=vim.json.encode(value)else text=tostring(value)end
-  local editor={item=item,column=column,targets=targets,return_win=S.main.win}
+  if value==vim.NIL or value==nil then text=""else text=cell_text(value)end
+  local column_type=vim.trim(((column.type or""):lower():gsub("%(.*$","")))
+  local binary=column_type=="bytea"or column_type=="binary"or column_type=="varbinary"or column_type=="image"or(item.profile.driver=="sqlite"and column_type:find("blob",1,true)~=nil)
+  local editor={item=item,column=column,targets=targets,return_win=S.main.win,binary=binary}
   editor.buf=make_buf("cell-editor/"..item.title.."/"..column.name,true)
   local lines=vim.split(text,"\n",{plain=true});if #lines==0 then lines={""}end
   vim.api.nvim_buf_set_lines(editor.buf,0,-1,false,lines);vim.bo[editor.buf].modified=false
@@ -1569,7 +1575,7 @@ open_value_viewer = function()
   local cursor=S.main.win and vim.api.nvim_win_is_valid(S.main.win)and vim.api.nvim_win_get_cursor(S.main.win)or{3,0};local row_index=cursor[1]-2;local column_index=item.active_col or 1;local row=item.data.rows and item.data.rows[row_index];local column=item.columns and item.columns[column_index]
   if not row or not column then notify("Select a data cell first",vim.log.levels.WARN);return end
   local value=row[column_index];local text
-  if value==nil or value==vim.NIL then text="NULL"elseif type(value)=="table"then text=vim.json.encode(value)else text=tostring(value)end
+  if value==nil or value==vim.NIL then text="NULL"else text=cell_text(value)end
   local lines=vim.split(text,"\n",{plain=true});if #lines==0 then lines={""}end
   if S.viewer and S.viewer.win and vim.api.nvim_win_is_valid(S.viewer.win)then pcall(vim.api.nvim_win_close,S.viewer.win,true)end
   local viewer={column=column,return_win=vim.api.nvim_get_current_win()};viewer.buf=make_buf("value/"..column.name,false);vim.bo[viewer.buf].bufhidden="wipe";set_lines(viewer.buf,lines);vim.bo[viewer.buf].readonly=true
