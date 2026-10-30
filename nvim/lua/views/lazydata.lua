@@ -1619,7 +1619,7 @@ local function show_help()
     headings[#headings+1]=#lines+1;lines[#lines+1]=title
     for _,binding in ipairs(bindings)do
       shortcuts[#shortcuts+1]={row=#lines+1,length=#binding[1]}
-      lines[#lines+1]=string.format("  %-12s %s",binding[1],binding[2])
+      lines[#lines+1]=string.format("  %-15s %s",binding[1],binding[2])
     end
     lines[#lines+1]=""
   end
@@ -1632,11 +1632,11 @@ local function show_help()
     {"u","unique values"},{"f/F","remove one/all filters"},{"Shift-K/J","sort ascending/descending"},{"[[/]]","previous/next 30 rows"},
   })
   group("Editing",{
-    {"Space","mark/unmark row"},{"e","edit current/marked row cells"},{"Ctrl-S","stage edit / execute table changes"},
-    {"Ctrl-N","stage NULL in cell editor"},{"U","discard staged table changes"},{"d","delete marked/current row"},
+    {"Space","mark/unmark row"},{"e","edit current/marked row cells"},{"Ctrl-S :save","stage edit / execute table changes"},
+    {"Ctrl-N :null","stage NULL in cell editor"},{"U","discard staged table changes"},{"d","delete marked/current row"},
   })
   group("Queries",{
-    {"Ctrl-E","new query"},{":query","current table and filters to query"},{"Ctrl-R","run query"},{"Ctrl-C","cancel query"},{"[r/]r","previous/next result"},
+    {"Ctrl-E :new","new query"},{":query","current table and filters to query"},{"Ctrl-R :run","run query"},{"Ctrl-C :cancel","cancel query"},{"[r/]r","previous/next result"},
   })
   group("Workspace",{
     {"[b/]b","previous/next tab"},{"X","close tab"},{"D","switch database"},{"R","refresh current view"},{"q","quit"},
@@ -1711,8 +1711,18 @@ function M.launch()
   setup_highlights();vim.api.nvim_create_autocmd("ColorScheme",{callback=setup_highlights})
   vim.o.termguicolors=true;vim.o.laststatus=2;vim.o.showtabline=0
   S.group=vim.api.nvim_create_augroup("LazyData",{clear=true})
-  vim.api.nvim_create_user_command("Query",open_filter_query,{desc="Create a query from the current LazyData table and filters",force=true})
-  vim.cmd([[cnoreabbrev <expr> query getcmdtype() ==# ':' && getcmdline() ==# 'query' ? 'Query' : 'query']])
+  local function command(name,fn,desc)
+    local cmd=name:sub(1,1):upper()..name:sub(2)
+    vim.api.nvim_create_user_command(cmd,function()fn()end,{desc=desc,force=true})
+    vim.cmd(string.format([[cnoreabbrev <expr> %s getcmdtype() ==# ':' && getcmdline() ==# '%s' ? '%s' : '%s']],name,name,cmd,name))
+  end
+  command("query",open_filter_query,"Create a query from the current LazyData table and filters")
+  command("new",open_query,"Open a new LazyData SQL query")
+  command("run",execute_query,"Run the current LazyData SQL query")
+  command("cancel",cancel_request,"Cancel the running LazyData query")
+  command("save",function()if S.form then save_form(S.form)elseif S.cell_editor then stage_cell_editor(S.cell_editor,false)else save_table_edits()end end,"Save the connection, stage the cell edit, or execute staged table changes")
+  command("null",function()if S.cell_editor then stage_cell_editor(S.cell_editor,true)else notify("Open the cell editor with e first",vim.log.levels.WARN)end end,"Stage NULL in the LazyData cell editor")
+  command("test",function()if S.form then test_form(S.form)end end,"Test the LazyData connection form")
   S.main.buf=make_buf("connections",false);S.sidebar.buf=make_buf("tables",false);S.result.buf=make_buf("results",false)
   configure(S.main.buf);configure(S.sidebar.buf);configure(S.result.buf)
   vim.api.nvim_create_autocmd("VimResized",{group=S.group,callback=function()vim.schedule(function()M.apply_layout(true)end)end})

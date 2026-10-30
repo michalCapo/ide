@@ -105,20 +105,20 @@ assert(#help_lines > 20, "help dialog did not display one keybinding per row")
 for _,heading in ipairs({"Navigation","Table data","Editing","Queries","Workspace"})do
   assert(vim.tbl_contains(help_lines,"  "..heading),"help dialog is missing the "..heading.." group")
 end
-assert(vim.tbl_contains(help_lines, "    D            switch database"), "help dialog is missing the database keybinding row")
-assert(vim.tbl_contains(help_lines, "    yy/y         copy current field / marked rows"), "help dialog is missing the copy keybinding row")
-assert(vim.tbl_contains(help_lines, "    :query       current table and filters to query"), "help dialog is missing the filtered-query command")
-assert(vim.tbl_contains(help_lines, "    Space        mark/unmark row"), "help dialog is missing the row-mark keybinding")
-assert(vim.tbl_contains(help_lines, "    e            edit current/marked row cells"), "help dialog is missing the row-edit keybinding")
-assert(vim.tbl_contains(help_lines, "    Ctrl-S       stage edit / execute table changes"), "help dialog is missing the contextual row-save keybinding")
-assert(vim.tbl_contains(help_lines, "    Ctrl-N       stage NULL in cell editor"), "help dialog is missing the NULL-edit keybinding")
-assert(vim.tbl_contains(help_lines, "    U            discard staged table changes"), "help dialog is missing the row-discard keybinding")
-assert(vim.tbl_contains(help_lines, "    d            delete marked/current row"), "help dialog is missing the row-delete keybinding")
-assert(vim.tbl_contains(help_lines, "    Shift-K/J    sort ascending/descending"), "help dialog is missing grouped sort keybindings")
-assert(vim.tbl_contains(help_lines, "    [[/]]        previous/next 30 rows"), "help dialog is missing paged-row keybindings")
-assert(vim.tbl_contains(help_lines, "    h/l          previous/next column or panel"), "help dialog is missing horizontal navigation")
-assert(vim.tbl_contains(help_lines, "    j/k          move"), "help dialog did not preserve shortcut alignment")
-assert(vim.tbl_contains(help_lines, "    Backspace    connections"), "help dialog did not align long shortcuts")
+assert(vim.tbl_contains(help_lines, "    D               switch database"), "help dialog is missing the database keybinding row")
+assert(vim.tbl_contains(help_lines, "    yy/y            copy current field / marked rows"), "help dialog is missing the copy keybinding row")
+assert(vim.tbl_contains(help_lines, "    :query          current table and filters to query"), "help dialog is missing the filtered-query command")
+assert(vim.tbl_contains(help_lines, "    Space           mark/unmark row"), "help dialog is missing the row-mark keybinding")
+assert(vim.tbl_contains(help_lines, "    e               edit current/marked row cells"), "help dialog is missing the row-edit keybinding")
+assert(vim.tbl_contains(help_lines, "    Ctrl-S :save    stage edit / execute table changes"), "help dialog is missing the contextual row-save keybinding")
+assert(vim.tbl_contains(help_lines, "    Ctrl-N :null    stage NULL in cell editor"), "help dialog is missing the NULL-edit keybinding")
+assert(vim.tbl_contains(help_lines, "    U               discard staged table changes"), "help dialog is missing the row-discard keybinding")
+assert(vim.tbl_contains(help_lines, "    d               delete marked/current row"), "help dialog is missing the row-delete keybinding")
+assert(vim.tbl_contains(help_lines, "    Shift-K/J       sort ascending/descending"), "help dialog is missing grouped sort keybindings")
+assert(vim.tbl_contains(help_lines, "    [[/]]           previous/next 30 rows"), "help dialog is missing paged-row keybindings")
+assert(vim.tbl_contains(help_lines, "    h/l             previous/next column or panel"), "help dialog is missing horizontal navigation")
+assert(vim.tbl_contains(help_lines, "    j/k             move"), "help dialog did not preserve shortcut alignment")
+assert(vim.tbl_contains(help_lines, "    Backspace       connections"), "help dialog did not align long shortcuts")
 local heading_marks=0
 for _,mark in ipairs(vim.api.nvim_buf_get_extmarks(state.message_dialog.buf,-1,0,-1,{details=true}))do if mark[4].hl_group=="LazyDataHeader"then heading_marks=heading_marks+1 end end
 assert(heading_marks==5,"help dialog group headings were not highlighted")
@@ -408,7 +408,7 @@ assert(not vim.wo[state.main.win].winbar:find("Executing SQL query", 1, true), "
 vim.bo[query.buf].modifiable=true
 vim.api.nvim_buf_set_lines(query.buf,0,-1,false,{"DELETE FROM teams WHERE id = 1"})
 lazydata._confirm_override=function()return 1 end
-vim.api.nvim_feedkeys(string.char(18),"x",false)
+vim.api.nvim_feedkeys(":run\r","x",false)
 lazydata._confirm_override=nil
 assert(vim.wait(3000,function()return query.results and query.results[1] and query.results[1].affected~=nil end,20),"DELETE query did not return a completion result: loading="..tostring(query.query_loading).." results="..vim.inspect(query.results))
 local delete_result_lines=vim.api.nvim_buf_get_lines(query.result_buf,0,-1,false)
@@ -451,7 +451,7 @@ lazydata._confirm_override = function(prompt, choices, default)
   update_prompt = { prompt = prompt, choices = choices, default = default }
   return 1
 end
-vim.api.nvim_feedkeys(string.char(19), "x", false)
+vim.api.nvim_feedkeys(":save\r", "x", false)
 lazydata._confirm_override = nil
 assert(update_prompt and update_prompt.prompt:find("Execute 2 staged field updates across 2 rows", 1, true), "multi-row update did not request execution confirmation")
 assert(update_prompt.choices == "&Execute\n&Cancel" and update_prompt.default == 2, "update confirmation did not default to Cancel")

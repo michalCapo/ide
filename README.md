@@ -174,8 +174,10 @@ The active panel shows operation-specific loading messages for table queries,
 sorting, filters, SQL execution, and other database requests, then clears them
 when the request finishes. `[[`/`]]` load the previous or next 30-row page, and
 `[b`/`]b` switch open tables or query tabs. `<C-e>` opens a query and `<C-r>` runs it. In the
-connection dialog, `<C-t>` tests the connection and `<C-s>` saves it. Press `?`
-inside LazyData for the complete key list.
+connection dialog, `<C-t>` tests the connection and `<C-s>` saves it. Every
+Ctrl shortcut also has a command: `:new` (`<C-e>`), `:run` (`<C-r>`),
+`:cancel` (`<C-c>`), `:save` (`<C-s>`), `:null` (`<C-n>` in the cell editor),
+and `:test` (`<C-t>`). Press `?` inside LazyData for the complete key list.
 
 Build settings can be overridden on the command line:
 
