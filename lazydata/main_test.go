@@ -93,7 +93,7 @@ func TestSQLiteFullPath(t *testing.T) {
 	}
 	query := func(sql string) any {
 		t.Helper()
-		result, err := s.handle(Request{ID: sql, Method: "query", Params: raw(t, queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: sql})})
+		result, err := s.handle(Request{ID: sql, Method: "query", Params: raw(t, queryParams{ProfileID: p.ID, SQL: sql})})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +111,7 @@ func TestSQLiteFullPath(t *testing.T) {
 		t.Fatalf("columns = %#v, %v", columns, err)
 	}
 
-	rowsValue, err := s.handle(Request{ID: "rows", Method: "rows", Params: raw(t, rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}, Predicates: []Predicate{{Column: "team", Value: "core"}}, PageSize: 1})})
+	rowsValue, err := s.handle(Request{ID: "rows", Method: "rows", Params: raw(t, rowsParams{ProfileID: p.ID, Table: "people", Predicates: []Predicate{{Column: "team", Value: "core"}}, PageSize: 1})})
 	rows := rowsValue.(ResultSet)
 	if err != nil || len(rows.Rows) != 1 || !rows.HasMore {
 		t.Fatalf("rows = %#v, %v", rows, err)
@@ -120,16 +120,16 @@ func TestSQLiteFullPath(t *testing.T) {
 		t.Fatalf("id is not the first displayed column: %#v", rows)
 	}
 	sortedValue, err := s.handle(Request{ID: "sorted-rows", Method: "rows", Params: raw(t, rowsParams{
-		objectParams: objectParams{ProfileID: p.ID, Table: "people"},
-		PageSize:     10, SortColumn: "note", SortDirection: "desc",
+		ProfileID: p.ID, Table: "people",
+		PageSize: 10, SortColumn: "note", SortDirection: "desc",
 	})})
 	sorted := sortedValue.(ResultSet)
 	if err != nil || len(sorted.Rows) != 3 || sorted.Rows[0][2] != "two" || sorted.Rows[2][2] != "one" {
 		t.Fatalf("sorted rows = %#v, %v", sorted, err)
 	}
 	_, err = s.handle(Request{ID: "invalid-sort", Method: "rows", Params: raw(t, rowsParams{
-		objectParams: objectParams{ProfileID: p.ID, Table: "people"},
-		PageSize:     10, SortColumn: "missing", SortDirection: "asc",
+		ProfileID: p.ID, Table: "people",
+		PageSize: 10, SortColumn: "missing", SortDirection: "asc",
 	})})
 	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "invalid_sort" {
 		t.Fatalf("invalid sort error = %#v", err)
@@ -139,8 +139,8 @@ func TestSQLiteFullPath(t *testing.T) {
 	page := func(number, size int) ResultSet {
 		t.Helper()
 		value, pageErr := s.handle(Request{ID: fmt.Sprintf("page-%d", number), Method: "rows", Params: raw(t, rowsParams{
-			objectParams: objectParams{ProfileID: p.ID, Table: "paged"},
-			Page:         number, PageSize: size,
+			ProfileID: p.ID, Table: "paged",
+			Page: number, PageSize: size,
 		})})
 		if pageErr != nil {
 			t.Fatal(pageErr)
@@ -159,11 +159,11 @@ func TestSQLiteFullPath(t *testing.T) {
 	if len(lastPage.Rows) != 5 || lastPage.HasMore || lastPage.Rows[0][0] != int64(61) {
 		t.Fatalf("last page = %#v", lastPage)
 	}
-	distinctValue, err := s.handle(Request{ID: "distinct", Method: "distinct", Params: raw(t, distinctParams{rowsParams: rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}}, Column: "team"})})
+	distinctValue, err := s.handle(Request{ID: "distinct", Method: "distinct", Params: raw(t, distinctParams{ProfileID: p.ID, Table: "people", Column: "team"})})
 	if err != nil || len(distinctValue.([]map[string]any)) != 2 {
 		t.Fatalf("distinct = %#v, %v", distinctValue, err)
 	}
-	nullDistinctValue, err := s.handle(Request{ID: "distinct-null", Method: "distinct", Params: raw(t, distinctParams{rowsParams: rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}}, Column: "team", Search: "null"})})
+	nullDistinctValue, err := s.handle(Request{ID: "distinct-null", Method: "distinct", Params: raw(t, distinctParams{ProfileID: p.ID, Table: "people", Column: "team", Search: "null"})})
 	if err != nil {
 		t.Fatalf("NULL distinct search failed: %v", err)
 	}
@@ -183,8 +183,8 @@ func TestSQLiteFullPath(t *testing.T) {
 	updateRequest := func(id string, rows []rowUpdate) (any, error) {
 		t.Helper()
 		return s.handle(Request{ID: id, Method: "update_rows", Params: raw(t, updateRowsParams{
-			objectParams: objectParams{ProfileID: p.ID, Table: "people"},
-			Rows:         rows,
+			ProfileID: p.ID, Table: "people",
+			Rows: rows,
 		})})
 	}
 	updatedValue, err := updateRequest("update", []rowUpdate{
@@ -217,8 +217,8 @@ func TestSQLiteFullPath(t *testing.T) {
 	deleteRequest := func(id string, rows []map[string]any) (any, error) {
 		t.Helper()
 		return s.handle(Request{ID: id, Method: "delete_rows", Params: raw(t, deleteRowsParams{
-			objectParams: objectParams{ProfileID: p.ID, Table: "people"},
-			Rows:         rows,
+			ProfileID: p.ID, Table: "people",
+			Rows: rows,
 		})})
 	}
 	if _, err := deleteRequest("stale-delete", []map[string]any{{"id": int64(1)}, {"id": int64(999)}}); err == nil {
@@ -240,15 +240,15 @@ func TestSQLiteFullPath(t *testing.T) {
 	query(`CREATE TABLE no_key (value TEXT)`)
 	query(`INSERT INTO no_key(value) VALUES ('keep')`)
 	_, err = s.handle(Request{ID: "no-key-delete", Method: "delete_rows", Params: raw(t, deleteRowsParams{
-		objectParams: objectParams{ProfileID: p.ID, Table: "no_key"},
-		Rows:         []map[string]any{{"value": "keep"}},
+		ProfileID: p.ID, Table: "no_key",
+		Rows: []map[string]any{{"value": "keep"}},
 	})})
 	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "missing_primary_key" {
 		t.Fatalf("missing primary key error = %#v", err)
 	}
 	_, err = s.handle(Request{ID: "no-key-update", Method: "update_rows", Params: raw(t, updateRowsParams{
-		objectParams: objectParams{ProfileID: p.ID, Table: "no_key"},
-		Rows:         []rowUpdate{{Key: map[string]any{"value": "keep"}, Changes: map[string]any{"value": "changed"}}},
+		ProfileID: p.ID, Table: "no_key",
+		Rows: []rowUpdate{{Key: map[string]any{"value": "keep"}, Changes: map[string]any{"value": "changed"}}},
 	})})
 	if apiErr, ok := err.(*APIError); !ok || apiErr.Code != "missing_primary_key" {
 		t.Fatalf("missing primary key update error = %#v", err)
@@ -291,7 +291,7 @@ func TestSQLiteDistinctSearchBeyondInitialLimit(t *testing.T) {
 	}
 	run := func(sql string) {
 		t.Helper()
-		if _, queryErr := s.handle(Request{ID: sql, Method: "query", Params: raw(t, queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: sql})}); queryErr != nil {
+		if _, queryErr := s.handle(Request{ID: sql, Method: "query", Params: raw(t, queryParams{ProfileID: p.ID, SQL: sql})}); queryErr != nil {
 			t.Fatal(queryErr)
 		}
 	}
@@ -305,8 +305,8 @@ UNION ALL SELECT printf('common-%03d@skeletonas.sk', id) FROM sequence`)
 	request := func(search, rawWhere string) []map[string]any {
 		t.Helper()
 		value, distinctErr := s.handle(Request{ID: "distinct-" + search, Method: "distinct", Params: raw(t, distinctParams{
-			rowsParams: rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "contacts"}, RawWhere: rawWhere},
-			Column:     "email", Search: search,
+			ProfileID: p.ID, Table: "contacts", RawWhere: rawWhere,
+			Column: "email", Search: search,
 		})})
 		if distinctErr != nil {
 			t.Fatal(distinctErr)
@@ -347,7 +347,9 @@ func TestProfileConnectionTestDoesNotCreateSQLiteFile(t *testing.T) {
 	if _, execErr := db.Exec(`CREATE TABLE sample (id INTEGER)`); execErr != nil {
 		t.Fatal(execErr)
 	}
-	db.Close()
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
 	result, err := s.handle(Request{ID: "test-existing", Method: "test_profile", Params: raw(t, Profile{Name: "Existing", Driver: "sqlite", Path: existing})})
 	if err != nil || result.(map[string]any)["connected"] != true {
 		t.Fatalf("connection test = %#v, %v", result, err)
@@ -416,7 +418,7 @@ func testBinaryRoundTrip(t *testing.T, profile Profile, schema, setup string) (*
 		return decoded, json.Unmarshal(encoded, &decoded)
 	}
 	bin := func(hex string) map[string]any { return map[string]any{"$binary": hex} }
-	if _, err := call("query", queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: setup}); err != nil {
+	if _, err := call("query", queryParams{ProfileID: p.ID, SQL: setup}); err != nil {
 		t.Fatal(err)
 	}
 	object := objectParams{ProfileID: p.ID, Schema: schema, Table: "files"}
@@ -435,7 +437,7 @@ func testBinaryRoundTrip(t *testing.T, profile Profile, schema, setup string) (*
 	if got := rows(Predicate{Column: "data", Value: bin("0x89504e47")}); len(got) != 1 || cell(got[0], 2) != "png" {
 		t.Fatalf("filtered rows = %#v", got)
 	}
-	value, err := call("distinct", distinctParams{rowsParams: rowsParams{objectParams: object}, Column: "data", Search: "0x504e"})
+	value, err := call("distinct", distinctParams{objectParams: object, Column: "data", Search: "0x504e"})
 	if distinct, _ := value.([]any); err != nil || len(distinct) != 1 || !reflect.DeepEqual(distinct[0].(map[string]any)["value"], bin("0x89504E47")) {
 		t.Fatalf("distinct = %#v, %v", value, err)
 	}

@@ -1,3 +1,6 @@
+// Command vimd-sql is the database helper of the LazyData viewer (vimd). Without
+// arguments it serves JSON requests on stdin; with a command it runs the plain
+// `vimd <command>` interface, also installed as agent-db.
 package main
 
 import (
@@ -13,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -326,17 +330,17 @@ func (s *Server) writeConfigUnlocked(cfg Config) error {
 		return err
 	}
 	name := tmp.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -377,7 +381,7 @@ func (s *Server) saveProfile(p Profile) (Profile, error) {
 	})
 	for key, db := range s.pools {
 		if strings.HasPrefix(key, p.ID+"\x00") {
-			db.Close()
+			_ = db.Close()
 			delete(s.pools, key)
 		}
 	}
@@ -409,7 +413,7 @@ func (s *Server) deleteProfile(id string) error {
 	cfg.Connections = next
 	for key, db := range s.pools {
 		if strings.HasPrefix(key, id+"\x00") {
-			db.Close()
+			_ = db.Close()
 			delete(s.pools, key)
 		}
 	}
@@ -522,7 +526,7 @@ func (s *Server) pool(profileID, database string) (*sql.DB, Profile, error) {
 	s.mu.Lock()
 	if existing := s.pools[key]; existing != nil {
 		s.mu.Unlock()
-		db.Close()
+		_ = db.Close()
 		return existing, p, nil
 	}
 	s.pools[key] = db
@@ -589,7 +593,7 @@ func (s *Server) testProfile(req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx, done := s.requestContext(req.ID, p.TimeoutMS)
 	defer done()
 	started := time.Now()
@@ -604,7 +608,7 @@ func queryStrings(ctx context.Context, db *sql.DB, query string, args ...any) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var values []string
 	for rows.Next() {
 		var value string
@@ -666,7 +670,7 @@ func (s *Server) tables(req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []Table{}
 	for rows.Next() {
 		var t Table
@@ -727,7 +731,7 @@ func (s *Server) columnsFor(ctx context.Context, db queryer, profile Profile, p 
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var cid, notnull, primary int
 			var name, typ string
@@ -749,7 +753,7 @@ func (s *Server) columnsFor(ctx context.Context, db queryer, profile Profile, p 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var c Column
 		var def any
@@ -1035,7 +1039,7 @@ func (s *Server) rows(req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result, err := scanRows(rows, p.PageSize+1)
 	if err != nil {
 		return nil, err
@@ -1095,7 +1099,7 @@ func (s *Server) deleteRows(req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var deleted int64
 	for _, key := range p.Rows {
 		parts, args := make([]string, 0, len(primary)), make([]any, 0, len(primary))
@@ -1188,7 +1192,7 @@ func (s *Server) updateRows(req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var updated int64
 	for _, row := range p.Rows {
 		if len(row.Changes) == 0 {
@@ -1323,7 +1327,7 @@ func (s *Server) distinct(req Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	types, err := rows.ColumnTypes()
 	if err != nil {
 		return nil, err
@@ -1445,10 +1449,8 @@ func (s *Server) readGuard(ctx context.Context, db *sql.DB, profile Profile, use
 		return db, func() {}, nil
 	}
 	if profile.Driver == "mssql" {
-		for _, text := range userSQL {
-			if mssqlUnsafe(text) {
-				return nil, nil, s.readOnlyError()
-			}
+		if slices.ContainsFunc(userSQL, mssqlUnsafe) {
+			return nil, nil, s.readOnlyError()
 		}
 	}
 	conn, err := db.Conn(ctx)
@@ -1457,16 +1459,16 @@ func (s *Server) readGuard(ctx context.Context, db *sql.DB, profile Profile, use
 	}
 	if profile.Driver == "sqlite" {
 		if _, err := sqlite.Limit(conn, sqliteLimitAttached, 0); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil, nil, err
 		}
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: profile.Driver == "postgres"})
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
-	return tx, func() { tx.Rollback(); conn.Close() }, nil
+	return tx, func() { _ = tx.Rollback(); _ = conn.Close() }, nil
 }
 
 func (s *Server) readOnlyError() *APIError {
@@ -1505,7 +1507,7 @@ func (s *Server) query(req Request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		return scanResultSets(rows, p.Limit)
 	}
 	if returnsRows(p.SQL) {
@@ -1513,7 +1515,7 @@ func (s *Server) query(req Request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		return scanResultSets(rows, p.Limit)
 	}
 	res, err := db.ExecContext(ctx, p.SQL)
@@ -1536,6 +1538,6 @@ func (s *Server) close() {
 		cancel()
 	}
 	for _, db := range s.pools {
-		db.Close()
+		_ = db.Close()
 	}
 }

@@ -110,18 +110,17 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	path, err := configPath()
 	if err != nil {
-		fmt.Fprintln(stderr, "vimd:", err)
+		_, _ = fmt.Fprintln(stderr, "vimd:", err)
 		return 1
 	}
 	s := &Server{configPath: path, pools: map[string]*sql.DB{}, cancels: map[string]context.CancelFunc{}}
 	defer s.close()
 	if err := s.runCommand(args[0], args[1:], stdin, stdout, stderr); err != nil {
-		var usage usageError
-		if errors.As(err, &usage) {
-			fmt.Fprintf(stderr, "vimd: %s\nRun 'vimd --help' for usage.\n", usage.message)
+		if usage, ok := errors.AsType[usageError](err); ok {
+			_, _ = fmt.Fprintf(stderr, "vimd: %s\nRun 'vimd --help' for usage.\n", usage.message)
 			return 2
 		}
-		fmt.Fprintln(stderr, "vimd:", cliErrorText(err))
+		_, _ = fmt.Fprintln(stderr, "vimd:", cliErrorText(err))
 		return 1
 	}
 	return 0
@@ -133,8 +132,7 @@ func (e usageError) Error() string { return e.message }
 
 func cliErrorText(err error) string {
 	text := redact(err.Error())
-	var ae *APIError
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[*APIError](err); ok {
 		text = ae.Message
 		if ae.Detail != "" {
 			text += ": " + ae.Detail
@@ -372,7 +370,7 @@ func (s *Server) cliQuery(o cliOptions, stdin io.Reader, stdout, stderr io.Write
 		}
 		query = string(data)
 	}
-	result, err := s.call("query", queryParams{targetParams: targetParams{ProfileID: p.ID, Database: o.Database}, SQL: query, Limit: o.Limit})
+	result, err := s.call("query", queryParams{ProfileID: p.ID, Database: o.Database, SQL: query, Limit: o.Limit})
 	if err != nil {
 		return err
 	}
@@ -389,14 +387,18 @@ func (s *Server) cliQuery(o cliOptions, stdin io.Reader, stdout, stderr io.Write
 	for _, set := range sets {
 		if len(set.Columns) > 0 {
 			if printed {
-				fmt.Fprintln(stdout)
+				if _, err := fmt.Fprintln(stdout); err != nil {
+					return err
+				}
 			}
 			if err := writeRows(stdout, o, set.Columns, set.Rows); err != nil {
 				return err
 			}
 			printed = true
 		}
-		fmt.Fprintf(status, "(%s)\n", set.Message)
+		if _, err := fmt.Fprintf(status, "(%s)\n", set.Message); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -431,7 +433,9 @@ func writeRows(w io.Writer, o cliOptions, header []string, rows [][]any) error {
 	case "csv":
 		cw := csv.NewWriter(w)
 		if !o.NoHeader {
-			cw.Write(header)
+			if err := cw.Write(header); err != nil {
+				return err
+			}
 		}
 		for _, row := range rows {
 			cells := make([]string, len(row))
@@ -440,7 +444,9 @@ func writeRows(w io.Writer, o cliOptions, header []string, rows [][]any) error {
 					cells[i] = valueText(value)
 				}
 			}
-			cw.Write(cells)
+			if err := cw.Write(cells); err != nil {
+				return err
+			}
 		}
 		cw.Flush()
 		return cw.Error()
@@ -450,7 +456,9 @@ func writeRows(w io.Writer, o cliOptions, header []string, rows [][]any) error {
 			for i, name := range header {
 				cells[i] = cellEscaper.Replace(name)
 			}
-			fmt.Fprintln(w, strings.Join(cells, "\t"))
+			if _, err := fmt.Fprintln(w, strings.Join(cells, "\t")); err != nil {
+				return err
+			}
 		}
 		for _, row := range rows {
 			cells := make([]string, len(row))
@@ -460,13 +468,17 @@ func writeRows(w io.Writer, o cliOptions, header []string, rows [][]any) error {
 					cells[i] = cellEscaper.Replace(valueText(value))
 				}
 			}
-			fmt.Fprintln(w, strings.Join(cells, "\t"))
+			if _, err := fmt.Fprintln(w, strings.Join(cells, "\t")); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if !o.NoHeader {
-		fmt.Fprintln(tw, strings.Join(header, "\t"))
+		if _, err := fmt.Fprintln(tw, strings.Join(header, "\t")); err != nil {
+			return err
+		}
 	}
 	for _, row := range rows {
 		cells := make([]string, len(row))
@@ -476,7 +488,9 @@ func writeRows(w io.Writer, o cliOptions, header []string, rows [][]any) error {
 				cells[i] = cellEscaper.Replace(valueText(value))
 			}
 		}
-		fmt.Fprintln(tw, strings.Join(cells, "\t"))
+		if _, err := fmt.Fprintln(tw, strings.Join(cells, "\t")); err != nil {
+			return err
+		}
 	}
 	return tw.Flush()
 }
@@ -492,7 +506,7 @@ func skillDescription(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if value, ok := strings.CutPrefix(line, "description:"); ok {
 			return strings.TrimSpace(value), nil
 		}
@@ -543,7 +557,9 @@ func cliSkills(o cliOptions, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "\n---\n\n<!-- %s -->\n\n", strings.TrimPrefix(name, dir+"/"))
+		if _, err := fmt.Fprintf(stdout, "\n---\n\n<!-- %s -->\n\n", strings.TrimPrefix(name, dir+"/")); err != nil {
+			return err
+		}
 		if _, err := stdout.Write(data); err != nil {
 			return err
 		}

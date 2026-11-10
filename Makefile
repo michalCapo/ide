@@ -1,6 +1,18 @@
 SHELL := /bin/sh
 .ONESHELL:
 
+# Go module folders, relative to this file. Example: . app tools
+GO_MODULES := lazydata
+# Target systems for vet, lint, dead code and build. Example: linux windows
+# Tests run only when this machine's system is in the list.
+GO_OSES := linux
+# app: dead code fails check. lib: dead code is a warning, exported API can look unused.
+GO_KIND := app
+LINT_CONFIG := $(CURDIR)/.golangci.yml
+# The Go check targets need bash; the other targets keep /bin/sh.
+check check-extra check-security: SHELL := /bin/bash
+check check-extra check-security: .SHELLFLAGS := -euo pipefail -c
+
 ARCH ?= x86_64
 NVIM_VERSION ?= v0.12.5
 MICROMAMBA_VERSION := 2.9.0-0
@@ -44,13 +56,16 @@ INSTALL_NAME ?= nvim
 LIBRO_DIR ?= $(CURDIR)/../libro
 NVIM_PORTABLE_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/nvim-portable
 
-.PHONY: all help build update install release-assets libro-tools publish clean
+.PHONY: all help check check-extra check-security tools build update install release-assets libro-tools publish clean
 
 all: help
 
 help:
 	@printf '%s\n' \
 	  'Available commands:' \
+	  '  make check   Run all Go checks without changing files' \
+	  '  make check-security  Find known security problems in Go dependencies (needs internet)' \
+	  '  make tools   Install the Go check tools' \
 	  '  make build    Build portable nvim, vime, vimi, vimg, and vimd' \
 	  '  make update   Refresh cached downloads for the selected architecture' \
 	  '  make install  Build and install commands under ~/.local/bin' \
@@ -287,6 +302,117 @@ publish:
 	  [ "$$OLD_VERSION" = "$$VERSION" ] || gh release delete "$$OLD_VERSION" --yes
 	done
 	gh release view "$$VERSION" --json url --jq .url
+
+check: ## Run all checks without changing files
+	@set +e
+	status=0
+	run() {
+	  echo "==> $$*"
+	  if ! "$$@"; then
+	    status=1
+	    echo "!! failed: $$*" >&2
+	  fi
+	  echo
+	}
+
+	for tool in go gofmt staticcheck deadcode golangci-lint; do
+	  if ! command -v "$$tool" >/dev/null 2>&1; then
+	    status=1
+	    echo "!! missing tool: $$tool (run make tools)" >&2
+	  fi
+	done
+	[[ $$status -eq 0 ]] || exit 1
+
+	echo "==> gofmt -l"
+	go_files=()
+	while IFS= read -r -d '' file; do
+	  go_files+=("$$file")
+	done < <(find . -name '*.go' -not -path '*/vendor/*' -not -path '*/third_party/*' -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0)
+	if ! unformatted=$$(gofmt -l "$${go_files[@]}"); then
+	  status=1
+	  echo "!! failed: gofmt" >&2
+	fi
+	if [[ -n $$unformatted ]]; then
+	  status=1
+	  printf 'Not formatted:\n%s\n' "$$unformatted" >&2
+	fi
+	echo
+
+	for mod in $(GO_MODULES); do
+	  pushd "$$mod" >/dev/null
+	  echo "### module $$mod"
+	  echo
+	  run go mod tidy -diff
+	  run go fix -diff ./...
+
+	  # Code is dead only when no target system uses it.
+	  dead=""
+	  first=1
+	  for os in $(GO_OSES); do
+	    run env GOOS="$$os" go vet ./...
+	    run env GOOS="$$os" staticcheck ./...
+	    run env GOOS="$$os" golangci-lint run --config "$(LINT_CONFIG)" ./...
+	    run env GOOS="$$os" go build -o /dev/null ./...
+
+	    echo "==> GOOS=$$os deadcode -test ./..."
+	    if ! found=$$(GOOS="$$os" deadcode -test ./...); then
+	      status=1
+	      echo "!! failed: deadcode" >&2
+	    fi
+	    echo
+	    if [[ $$first -eq 1 ]]; then
+	      dead=$$found
+	      first=0
+	    else
+	      dead=$$(comm -12 <(sort <<<"$$dead") <(sort <<<"$$found"))
+	    fi
+	  done
+	  if [[ -n $$dead ]]; then
+	    if [[ "$(GO_KIND)" == lib ]]; then
+	      printf 'Warning, unused code (check before removing public API):\n%s\n\n' "$$dead"
+	    else
+	      status=1
+	      printf 'Dead code:\n%s\n\n' "$$dead" >&2
+	    fi
+	  fi
+
+	  if [[ " $(GO_OSES) " == *" $$(go env GOOS) "* ]]; then
+	    run go test ./...
+	  else
+	    printf '==> go test skipped: %s is not in GO_OSES\n\n' "$$(go env GOOS)"
+	  fi
+	  popd >/dev/null
+	done
+
+	run "$(MAKE)" --no-print-directory check-extra
+
+	if [[ $$status -eq 0 ]]; then
+	  echo "All checks passed."
+	else
+	  echo "Checks finished with errors." >&2
+	fi
+	exit "$$status"
+
+check-extra: ## Project-only checks, run by make check
+	@:
+
+check-security: ## Find known security problems in dependencies (needs internet)
+	@set +e
+	status=0
+	for mod in $(GO_MODULES); do
+	  for os in $(GO_OSES); do
+	    echo "==> $$mod GOOS=$$os govulncheck ./..."
+	    (cd "$$mod" && GOOS="$$os" govulncheck ./...) || status=1
+	    echo
+	  done
+	done
+	exit "$$status"
+
+tools: ## Install the check tools
+	go install honnef.co/go/tools/cmd/staticcheck@latest
+	go install golang.org/x/tools/cmd/deadcode@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	go install golang.org/x/vuln/cmd/govulncheck@latest
 
 clean:
 	rm -rf "$(DIST_DIR)"

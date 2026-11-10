@@ -138,11 +138,11 @@ func TestServerReadOnlyModeBlocksTableChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.call("query", queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: "CREATE TABLE people (id INTEGER PRIMARY KEY)"}); err != nil {
+	if _, err := s.call("query", queryParams{ProfileID: p.ID, SQL: "CREATE TABLE people (id INTEGER PRIMARY KEY)"}); err != nil {
 		t.Fatal(err)
 	}
 	s.readOnly = true
-	_, err = s.call("delete_rows", deleteRowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}, Rows: []map[string]any{{"id": 1}}})
+	_, err = s.call("delete_rows", deleteRowsParams{ProfileID: p.ID, Table: "people", Rows: []map[string]any{{"id": 1}}})
 	if err == nil || !strings.Contains(err.Error(), "--alter") {
 		t.Fatalf("delete in read-only mode = %v", err)
 	}
@@ -158,13 +158,13 @@ func TestReadOnlyGuardCoversFiltersAndAttach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.call("query", queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: "CREATE TABLE people (id INTEGER PRIMARY KEY)"}); err != nil {
+	if _, err := s.call("query", queryParams{ProfileID: p.ID, SQL: "CREATE TABLE people (id INTEGER PRIMARY KEY)"}); err != nil {
 		t.Fatal(err)
 	}
 	s.readOnly = true
 	attach := fmt.Sprintf("SELECT 1; ATTACH '%s' AS w; INSERT INTO w.people DEFAULT VALUES; COMMIT", p.Path)
-	_, _ = s.call("query", queryParams{targetParams: targetParams{ProfileID: p.ID}, SQL: attach})
-	_, _ = s.call("rows", rowsParams{objectParams: objectParams{ProfileID: p.ID, Table: "people"}, RawWhere: "1=1"})
+	_, _ = s.call("query", queryParams{ProfileID: p.ID, SQL: attach})
+	_, _ = s.call("rows", rowsParams{ProfileID: p.ID, Table: "people", RawWhere: "1=1"})
 	s.readOnly = false
 	out, err := runTestCommand(t, s, "", "query", "Local", "SELECT count(*) FROM people", "--alter")
 	if err != nil || !strings.Contains(out, "\n0\n") {
