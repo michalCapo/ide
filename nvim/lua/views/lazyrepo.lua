@@ -1004,18 +1004,29 @@ end
 
 local function branch_op(kind)
   local item = selected(); if not item or not item.name then return end
+  local merge = kind == "merge"
+  local head
+  local warn_if_unchanged = function()
+    if head ~= git.git(S.root, { "rev-parse", "HEAD" }) then return end
+    local message = "Nothing changed. The current branch already contains " .. item.name .. "."
+    if (item.behind or 0) > 0 then
+      local where = "Local branches"
+      for _, remote in ipairs(panel("remotes").items) do
+        if remote.name == item.upstream then where = "Remote branches"; break end
+      end
+      message = item.name .. " is already " .. (merge and "merged" or "included") .. ", but it is " .. item.behind
+        .. (item.behind == 1 and " commit" or " commits") .. " behind "
+        .. item.upstream .. ". Select " .. item.upstream .. " under " .. where .. " and press "
+        .. (merge and "M to merge those changes." or "r to rebase onto it.")
+    end
+    notify(message, vim.log.levels.WARN)
+  end
   local action = function()
-    if kind == "merge" then
-      run({ "merge", "--no-edit", item.name }, "Merge", true, nil, function(out)
-        if out:find("Already up to date", 1, true) and (item.behind or 0) > 0 then
-          notify(item.name .. " is already merged, but it is " .. item.behind
-            .. (item.behind == 1 and " commit" or " commits") .. " behind "
-            .. item.upstream .. ". Select " .. item.upstream .. " under Remote branches and press M to merge those changes.",
-            vim.log.levels.WARN)
-        end
-      end)
+    head = git.git(S.root, { "rev-parse", "HEAD" })
+    if merge then
+      run({ "merge", "--no-edit", item.name }, "Merge", true, nil, warn_if_unchanged)
     else
-      run({ "rebase", item.name }, kind, true)
+      run({ "rebase", item.name }, "Rebase", true, nil, warn_if_unchanged)
     end
   end
   if kind == "rebase" then
