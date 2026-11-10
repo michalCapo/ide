@@ -423,9 +423,11 @@ end
 local function sync_branches()
   if S.busy then return end
   S.busy = true
+  ui.progress("Syncing branches…")
   decorate()
   fetch_all(function(ok, err)
     S.busy = false
+    ui.progress(nil)
     if not ok then notify_error("Sync failed:\n" .. err); decorate(); return end
     M.refresh()
   end)
@@ -484,9 +486,11 @@ end
 local function run(args, label, async, opts, on_success)
   if S.busy then return end
   S.busy = true
+  ui.progress((label or "Git operation") .. "…")
   for _, name in ipairs(S.order) do render(name) end
   local done = function(ok, out, err)
     S.busy = false
+    ui.progress(nil)
     if not ok then notify_error((label or "Git operation") .. " failed:\n" .. err) end
     M.refresh()
     S.watch_pending = false

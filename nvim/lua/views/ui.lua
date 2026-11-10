@@ -71,6 +71,8 @@ function M.setup_highlights()
   hl("UiFloatMuted", { fg = c.mut, bg = c.float })
   hl("UiFloatKey", { fg = c.fgb, bg = c.chip })
   hl("UiFloatPrimary", { fg = c.onacc, bg = c.accbg, bold = true })
+  hl("UiFloatAccent", { fg = c.acc, bg = c.float, bold = true })
+  hl("UiFloatStrong", { fg = c.fgb, bg = c.float })
   hl("UiAccent", { fg = c.acc })
   hl("UiStrong", { fg = c.fgb })
   hl("UiMuted", { fg = c.mut })
@@ -90,6 +92,7 @@ function M.setup_highlights()
 end
 
 local augroup = vim.api.nvim_create_augroup("ViewsUi", { clear = true })
+local progress_ns = vim.api.nvim_create_namespace("views_ui_progress")
 local highlights_ready = false
 
 -- Defines the highlights once and keeps them in step with the colorscheme.
@@ -186,30 +189,92 @@ function M.float_title(text, group)
   return { { " " .. tostring(text):gsub("^%s+", ""):gsub("%s+$", "") .. " ", group or "UiFloatTitle" } }
 end
 
-function M.float_footer(list, primary)
-  local chunks = { { " ", "UiFloatBorder" } }
+-- Key chips for a float footer. With `max_width`, trailing chips that do not
+-- fit are left out, so the first (most important) keys stay visible.
+function M.float_footer(list, primary, max_width)
+  local chunks, width = { { " ", "UiFloatBorder" } }, 1
   for index, item in ipairs(list or {}) do
-    chunks[#chunks + 1] = { " " .. item[1] .. " ", index == 1 and primary and "UiFloatPrimary" or "UiFloatKey" }
-    chunks[#chunks + 1] = { " " .. item[2] .. "  ", "UiFloatMuted" }
+    local key, label = " " .. item[1] .. " ", " " .. item[2] .. "  "
+    local size = vim.fn.strdisplaywidth(key .. label)
+    if max_width and index > 1 and width + size - 1 > max_width then break end
+    width = width + size
+    chunks[#chunks + 1] = { key, index == 1 and primary and "UiFloatPrimary" or "UiFloatKey" }
+    chunks[#chunks + 1] = { label, "UiFloatMuted" }
   end
   chunks[#chunks] = { chunks[#chunks][1]:gsub("%s+$", " "), "UiFloatMuted" }
   return chunks
 end
 
-M.float_highlight = "Normal:UiFloat,NormalNC:UiFloat,FloatBorder:UiFloatBorder,FloatTitle:UiFloatTitle,FloatFooter:UiFloatMuted,EndOfBuffer:UiFloat,CursorLine:UiSelect"
+M.float_highlight = "Normal:UiFloat,NormalNC:UiFloat,FloatBorder:UiFloatBorder,FloatTitle:UiFloatTitle,FloatFooter:UiFloatMuted,EndOfBuffer:UiFloat,CursorLine:UiSelect,SignColumn:UiFloat,CursorLineSign:UiSelectBar"
+
+-- Small centred popup with a spinner while a long task runs; nil hides it.
+local progress = {}
+local SPINNER = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+
+local function progress_draw()
+  if not (progress.buf and vim.api.nvim_buf_is_valid(progress.buf)) then return end
+  progress.frame = progress.frame % #SPINNER + 1
+  local line = " " .. SPINNER[progress.frame] .. "  " .. progress.text .. " "
+  vim.api.nvim_buf_set_lines(progress.buf, 0, -1, false, { line })
+  vim.api.nvim_buf_set_extmark(progress.buf, progress_ns, 0, 1, { id = 1, end_col = 1 + #SPINNER[progress.frame], hl_group = "UiFloatAccent" })
+  local width = vim.fn.strdisplaywidth(line)
+  local config = {
+    relative = "editor", style = "minimal", border = "rounded", focusable = false, zindex = 90,
+    width = width, height = 1, row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - 3) / 2)),
+    col = math.max(0, math.floor((vim.o.columns - width - 2) / 2)),
+  }
+  if progress.win and vim.api.nvim_win_is_valid(progress.win) then
+    vim.api.nvim_win_set_config(progress.win, config)
+  else
+    progress.win = vim.api.nvim_open_win(progress.buf, false, config)
+    vim.wo[progress.win].winhighlight = "Normal:UiFloatStrong,FloatBorder:UiFloatAccent"
+  end
+end
+
+function M.progress(text)
+  if not text then
+    if progress.timer then progress.timer:stop(); progress.timer:close() end
+    if progress.win and vim.api.nvim_win_is_valid(progress.win) then pcall(vim.api.nvim_win_close, progress.win, true) end
+    if progress.buf and vim.api.nvim_buf_is_valid(progress.buf) then pcall(vim.api.nvim_buf_delete, progress.buf, { force = true }) end
+    progress = {}
+    return
+  end
+  M.ensure_highlights()
+  progress.text = text
+  progress.frame = progress.frame or 0
+  if not (progress.buf and vim.api.nvim_buf_is_valid(progress.buf)) then
+    progress.buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[progress.buf].bufhidden = "wipe"
+  end
+  progress_draw()
+  if not progress.timer then
+    progress.timer = vim.uv.new_timer()
+    progress.timer:start(80, 80, vim.schedule_wrap(progress_draw))
+  end
+end
 
 -- Selection bar: a "▎" sign on the cursor line of every window showing `buf`.
 local bar_ns = vim.api.nvim_create_namespace("views_ui_select_bar")
+
+local function set_select_bar(buf, row)
+  pcall(vim.api.nvim_buf_set_extmark, buf, bar_ns, row, 0, { sign_text = "▎", sign_hl_group = "UiSelectBar", priority = 5 })
+end
 
 function M.update_select_bar(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return end
   vim.api.nvim_buf_clear_namespace(buf, bar_ns, 0, -1)
   for _, win in ipairs(vim.fn.win_findbuf(buf)) do
     if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative == "" then
-      local row = vim.api.nvim_win_get_cursor(win)[1] - 1
-      pcall(vim.api.nvim_buf_set_extmark, buf, bar_ns, row, 0, { sign_text = "▎", sign_hl_group = "UiSelectBar", priority = 5 })
+      set_select_bar(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
     end
   end
+end
+
+-- Selection bar on one 0-based row of a dialog buffer; nil clears it.
+function M.select_bar(buf, row)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.api.nvim_buf_clear_namespace(buf, bar_ns, 0, -1)
+  if row then set_select_bar(buf, row) end
 end
 
 function M.attach_select_bar(buf)

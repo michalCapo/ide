@@ -1336,6 +1336,24 @@ local function apply_code_highlights()
   paint_lang(langs, { "@type", "@type.builtin", "@constructor", "@lsp.type.type", "@lsp.type.typeParameter", "@lsp.type.class", "@lsp.type.interface", "@lsp.type.struct" }, { fg = c.type })
 end
 
+-- Dialogs, popups and menus use the shared ui colours. They carry their own
+-- backgrounds, so a transparency plugin that clears NormalFloat or Pmenu after
+-- startup cannot leave dialogs without a background.
+local function apply_dialog_highlights()
+  ui.setup_highlights()
+  vim.api.nvim_set_hl(0, "PiPickerNormal", { link = "UiFloat" })
+  vim.api.nvim_set_hl(0, "PiPickerBorder", { link = "UiFloatBorder" })
+  vim.api.nvim_set_hl(0, "PiPickerSelected", { link = "UiSelect" })
+  vim.api.nvim_set_hl(0, "PiPickerTitle", { link = "UiFloatTitle" })
+  vim.api.nvim_set_hl(0, "PiPickerMuted", { link = "UiFloatMuted" })
+  vim.api.nvim_set_hl(0, "NormalFloat", { link = "UiFloat" })
+  vim.api.nvim_set_hl(0, "FloatBorder", { link = "UiFloatBorder" })
+  vim.api.nvim_set_hl(0, "FloatTitle", { link = "UiFloatTitle" })
+  vim.api.nvim_set_hl(0, "FloatFooter", { link = "UiFloatMuted" })
+  vim.api.nvim_set_hl(0, "Pmenu", { link = "UiFloat" })
+  vim.api.nvim_set_hl(0, "PmenuSel", { link = "UiSelect" })
+end
+
 local function apply_picker_highlights()
   local function paint_foreground_on_background(group, foreground_group, background_group)
     local foreground = vim.api.nvim_get_hl(0, { name = foreground_group, link = false })
@@ -1344,11 +1362,7 @@ local function apply_picker_highlights()
     vim.api.nvim_set_hl(0, group, foreground)
   end
 
-  vim.api.nvim_set_hl(0, "PiPickerNormal", { link = "NormalFloat" })
-  vim.api.nvim_set_hl(0, "PiPickerBorder", { link = "FloatBorder" })
-  vim.api.nvim_set_hl(0, "PiPickerSelected", { link = "PmenuSel" })
-  vim.api.nvim_set_hl(0, "PiPickerTitle", { link = "FloatTitle" })
-  vim.api.nvim_set_hl(0, "PiPickerMuted", { link = "Comment" })
+  apply_dialog_highlights()
   vim.api.nvim_set_hl(0, "DapBreakpointSign", { link = "DiagnosticError" })
   vim.api.nvim_set_hl(0, "DapBreakpointLine", { link = "DiagnosticVirtualTextError" })
   vim.api.nvim_set_hl(0, "DapBreakpointNumber", { link = "DiagnosticError" })
@@ -1362,7 +1376,6 @@ local function apply_picker_highlights()
   vim.api.nvim_set_hl(0, "NvimLandingVersion", { link = "Comment" })
   vim.api.nvim_set_hl(0, "FunctionContextWinbar", { link = "WinBar" })
   vim.api.nvim_set_hl(0, "FunctionContextWinbarLine", { link = "LineNr" })
-  ui.setup_highlights()
   vim.api.nvim_set_hl(0, "BufferTabActive", { link = "UiTabActive" })
   vim.api.nvim_set_hl(0, "BufferTabInactive", { link = "UiTab" })
   paint_foreground_on_background("BufferTabErrorActive", "DiagnosticError", "UiTabActive")
@@ -1388,10 +1401,10 @@ end
 apply_os_background()
 
 -- A manual :colorscheme clears every group; restore the shared tab and status line colours.
-vim.api.nvim_create_autocmd("ColorScheme", {
-  group = vim.api.nvim_create_augroup("VimeUiHighlights", { clear = true }),
-  callback = apply_picker_highlights,
-})
+local ui_highlight_group = vim.api.nvim_create_augroup("VimeUiHighlights", { clear = true })
+vim.api.nvim_create_autocmd("ColorScheme", { group = ui_highlight_group, callback = apply_picker_highlights })
+-- User plugins load after this file and may clear float backgrounds.
+vim.api.nvim_create_autocmd("VimEnter", { group = ui_highlight_group, once = true, callback = apply_dialog_highlights })
 
 local function reserve_code_signcolumn(win)
   win = win or vim.api.nvim_get_current_win()
@@ -1980,6 +1993,10 @@ local function focus_file_explorer()
     width = width,
     height = height,
     border = "rounded",
+    title = ui.float_title("Files"),
+    title_pos = "left",
+    footer = ui.float_footer({ { "Enter", "open" }, { "h/l", "fold" }, { "%", "new file" }, { "r", "rename" }, { "d", "delete" }, { "Esc", "close" } }, true, width - 2),
+    footer_pos = "right",
     style = "minimal",
   })
 
@@ -1987,6 +2004,7 @@ local function focus_file_explorer()
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
   vim.wo[win].foldcolumn = "0"
+  vim.wo[win].winhighlight = ui.float_highlight
   explore_selected_file()
 end
 
@@ -2555,7 +2573,7 @@ local function fuzzy_files()
       local name = vim.fn.fnamemodify(short_display_path(path), ":t")
       local name_end = math.min(#name, #display)
       return display, {
-        { start_col = 0, end_col = name_end, hl = "SymbolDialogName" },
+        { start_col = 0, end_col = name_end, hl = "SymbolDialogFile" },
         { start_col = name_end, end_col = #display, hl = "SymbolDialogMuted" },
       }
     end,
@@ -2973,13 +2991,13 @@ local function which_key_show(prefix)
   apply_picker_highlights()
   which_key_close()
 
-  local lines = { "Prefix: " .. which_key_prefix_label(prefix), "" }
+  local lines = {}
   local key_width = 1
   for _, row in ipairs(rows) do
     key_width = math.max(key_width, vim.fn.strdisplaywidth(row.key))
   end
   for _, row in ipairs(rows) do
-    table.insert(lines, string.format("  %-" .. key_width .. "s  %s", row.key, row.desc))
+    table.insert(lines, string.format("  %-" .. key_width .. "s   %s", row.key, row.desc))
   end
 
   local content_width = 0
@@ -3003,16 +3021,20 @@ local function which_key_show(prefix)
     width = width,
     height = height,
     border = "rounded",
-    title = " Which key ",
-    title_pos = "center",
+    title = { { " Which key ", "UiFloatTitle" }, { which_key_prefix_label(prefix) .. " ", "UiFloatMuted" } },
+    title_pos = "left",
     style = "minimal",
   })
   vim.wo[which_key.win].number = false
   vim.wo[which_key.win].relativenumber = false
   vim.wo[which_key.win].signcolumn = "no"
-  vim.wo[which_key.win].winhighlight = "Normal:PiPickerNormal,FloatBorder:PiPickerBorder,FloatTitle:PiPickerTitle"
+  vim.wo[which_key.win].winhighlight = ui.float_highlight
 
-  vim.api.nvim_buf_add_highlight(which_key.buf, which_key.namespace, "PiPickerTitle", 0, 0, -1)
+  for index, row in ipairs(rows) do
+    vim.api.nvim_buf_add_highlight(which_key.buf, which_key.namespace, "UiFloatAccent", index - 1, 2, 2 + #row.key)
+    local desc_group = row.desc:match("^%+") and "UiFloatMuted" or "UiFloatStrong"
+    vim.api.nvim_buf_add_highlight(which_key.buf, which_key.namespace, desc_group, index - 1, 5 + key_width, -1)
+  end
   vim.cmd.redraw()
 end
 
@@ -3139,15 +3161,17 @@ local function floating_input(opts, on_confirm)
     width = width,
     height = 1,
     border = "rounded",
-    title = " " .. (opts.prompt or "Input") .. " ",
-    title_pos = "center",
+    title = ui.float_title((tostring(opts.prompt or "Input"):gsub(":%s*$", ""))),
+    title_pos = "left",
+    footer = ui.float_footer({ { "Enter", "confirm" }, { "Esc", "cancel" } }, true),
+    footer_pos = "right",
     style = "minimal",
   })
 
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
-  vim.wo[win].winhighlight = "Normal:PiPickerNormal,FloatBorder:PiPickerBorder,FloatTitle:PiPickerTitle"
+  vim.wo[win].winhighlight = ui.float_highlight
 
   local done = false
   local function finish(value)
@@ -3207,6 +3231,7 @@ local function floating_popup_options(opts)
   opts.width_ratio = nil
   opts.height_ratio = nil
   opts.border = opts.border or "rounded"
+  opts.title_pos = opts.title and (opts.title_pos or "left") or nil
   opts.max_width = opts.max_width or math.max(24, math.min(width_cap, math.floor(vim.o.columns * width_ratio)))
   opts.max_height = opts.max_height or math.max(4, math.min(height_cap, math.floor(vim.o.lines * height_ratio)))
   return opts
@@ -3214,7 +3239,7 @@ end
 
 local function apply_floating_winhighlight(win)
   if win and vim.api.nvim_win_is_valid(win) then
-    vim.wo[win].winhighlight = "Normal:PiPickerNormal,FloatBorder:PiPickerBorder,FloatTitle:PiPickerTitle"
+    vim.wo[win].winhighlight = ui.float_highlight
   end
 end
 
@@ -3237,6 +3262,7 @@ local function lsp_hover_popup()
       local view = widgets.hover(nil, {
         border = "rounded",
         title = " Debug value ",
+        title_pos = "left",
       })
       configure_dap_hover_view(view)
       return
@@ -3339,13 +3365,21 @@ floating_select = function(items, opts, on_choice)
   local selected = 1
   local top = 1
   local is_selectable = opts.is_selectable or function() return true end
-  local title_prefix = opts.title or opts.prompt or "Select"
+  local title_prefix = vim.trim(tostring(opts.title or opts.prompt or "Select"):gsub(":%s*$", ""))
   local function picker_title()
+    local count = filter_query ~= ""
+      and string.format("%d/%d ", #items, #source_items)
+      or string.format("%d item%s ", #items, #items == 1 and "" or "s")
+    local title = { { " " .. title_prefix .. " ", "UiFloatTitle" }, { count, "UiFloatMuted" } }
     if filter_query ~= "" then
-      return string.format(" %s  %d/%d item%s  filter: %s ", title_prefix, #items, #source_items, #items == 1 and "" or "s", filter_query)
+      table.insert(title, { " " .. filter_query .. " ", "UiFloatKey" })
+      table.insert(title, { " ", "UiFloatBorder" })
     end
-    return string.format(" %s  %d item%s ", title_prefix, #items, #items == 1 and "" or "s")
+    return title
   end
+  local footer_keys = type(opts.footer) == "table" and opts.footer or (opts.direct_filter
+    and { { "Enter", "open" }, { "↑↓", "move" }, { "type", "narrow" }, { "BS", "erase" }, { "PgUp/PgDn", "page" }, { "C-d/u", "half" }, { "Esc", "close" } }
+    or { { "Enter", "open" }, { "j/k", "move" }, { "/", "narrow" }, { "PgUp/PgDn", "page" }, { "C-d/u", "half" }, { "q/Esc", "close" } })
 
   local function first_selectable_index()
     for i, item in ipairs(items) do
@@ -3357,11 +3391,8 @@ floating_select = function(items, opts, on_choice)
   end
 
   local buf = vim.api.nvim_create_buf(false, true)
-  local footer_buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = "wipe"
-  vim.bo[footer_buf].modifiable = false
-  vim.bo[footer_buf].bufhidden = "wipe"
 
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "win",
@@ -3372,29 +3403,18 @@ floating_select = function(items, opts, on_choice)
     height = height,
     border = "rounded",
     title = picker_title(),
-    title_pos = "center",
-    style = "minimal",
-  })
-  local footer_win = vim.api.nvim_open_win(footer_buf, false, {
-    relative = "win",
-    win = base_win,
-    row = row + height + 1,
-    col = col,
-    width = width,
-    height = 1,
-    border = "rounded",
+    title_pos = "left",
+    footer = ui.float_footer(footer_keys, true, width - 2),
+    footer_pos = "right",
     style = "minimal",
   })
 
-  for _, picker_win in ipairs({ win, footer_win }) do
-    vim.wo[picker_win].number = false
-    vim.wo[picker_win].relativenumber = false
-    vim.wo[picker_win].signcolumn = "no"
-    vim.wo[picker_win].winhighlight = "Normal:PiPickerNormal,FloatBorder:PiPickerBorder,FloatTitle:PiPickerTitle,CursorLine:PiPickerSelected"
-  end
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "yes:1"
+  vim.wo[win].winhighlight = ui.float_highlight
   vim.wo[win].cursorline = true
   vim.wo[win].wrap = false
-  vim.wo[footer_win].winhighlight = "Normal:PiPickerMuted,FloatBorder:PiPickerBorder"
 
   local function fit(text)
     text = tostring(text):gsub("\t", "  ")
@@ -3408,27 +3428,16 @@ floating_select = function(items, opts, on_choice)
     local display = {}
     for i = 1, height do
       local index = top + i - 1
-      if raw_lines[index] then
-        display[i] = fit((index == selected and "▸ " or "  ") .. raw_lines[index])
-      else
-        display[i] = ""
-      end
+      display[i] = raw_lines[index] and fit(" " .. raw_lines[index]) or ""
     end
 
     vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, display)
     vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
-
-    vim.api.nvim_set_option_value("modifiable", true, { buf = footer_buf })
-    local default_footer = opts.direct_filter
-      and "  ↑/↓ move   PgUp/PgDn page   C-d/u half   type to narrow   Backspace erase   Enter open   Esc close"
-      or "  ↑/↓ j/k move   PgUp/PgDn page   C-d/u half   / narrow   Enter open   q/Esc close"
-    local footer = opts.footer or default_footer
-    vim.api.nvim_buf_set_lines(footer_buf, 0, -1, false, { footer })
-    vim.api.nvim_set_option_value("modifiable", false, { buf = footer_buf })
+    ui.select_bar(buf, selected - top)
 
     if vim.api.nvim_win_is_valid(win) then
-      pcall(vim.api.nvim_win_set_config, win, { title = picker_title(), title_pos = "center" })
+      pcall(vim.api.nvim_win_set_config, win, { title = picker_title(), title_pos = "left" })
       vim.api.nvim_win_set_cursor(win, { selected - top + 1, 0 })
     end
   end
@@ -3436,9 +3445,6 @@ floating_select = function(items, opts, on_choice)
   local function close()
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
-    end
-    if vim.api.nvim_win_is_valid(footer_win) then
-      vim.api.nvim_win_close(footer_win, true)
     end
   end
 
@@ -4712,13 +4718,15 @@ local symbol_dialog_namespace = vim.api.nvim_create_namespace("file_symbol_dialo
 
 local function apply_symbol_dialog_highlights()
   apply_picker_highlights()
-  vim.api.nvim_set_hl(0, "SymbolDialogPrompt", { link = "PiPickerMuted" })
-  vim.api.nvim_set_hl(0, "SymbolDialogPromptText", { link = "PiPickerNormal" })
-  vim.api.nvim_set_hl(0, "SymbolDialogSelected", { link = "PiPickerSelected" })
+  vim.api.nvim_set_hl(0, "SymbolDialogPrompt", { link = "UiFloatMuted" })
+  vim.api.nvim_set_hl(0, "SymbolDialogPromptText", { link = "UiStrong" })
+  vim.api.nvim_set_hl(0, "SymbolDialogSelected", { link = "UiSelect" })
   vim.api.nvim_set_hl(0, "SymbolDialogKind", { link = "Type" })
   vim.api.nvim_set_hl(0, "SymbolDialogName", { link = "Identifier" })
-  vim.api.nvim_set_hl(0, "SymbolDialogDetail", { link = "Normal" })
-  vim.api.nvim_set_hl(0, "SymbolDialogMuted", { link = "Comment" })
+  -- Foreground only, so the selected row keeps its background.
+  vim.api.nvim_set_hl(0, "SymbolDialogFile", { link = "UiStrong" })
+  vim.api.nvim_set_hl(0, "SymbolDialogDetail", { fg = ui.palette().fg })
+  vim.api.nvim_set_hl(0, "SymbolDialogMuted", { link = "UiMuted" })
 end
 
 local function file_symbol_kind_label(item)
@@ -4838,31 +4846,24 @@ open_file_symbol_dialog = function(source_items, opts, on_choice)
   local row = math.max(0, math.floor((available_height - height - 2) / 2))
   local col = math.max(0, math.floor((available_width - width) / 2))
   local list_height = math.max(1, height - 2)
-  local footer_text = opts.footer or "↑/↓ move   C-d/u half   / search   Backspace erase   Enter open   Esc unfocus   2x Esc close"
-  local footer_lines = { "" }
-  for _, entry in ipairs(vim.split(footer_text, "%s%s+", { trimempty = true })) do
-    local separator = footer_lines[#footer_lines] == "" and "" or "   "
-    if vim.fn.strdisplaywidth(footer_lines[#footer_lines] .. separator .. entry) <= width - 4 then
-      footer_lines[#footer_lines] = footer_lines[#footer_lines] .. separator .. entry
-    else
-      table.insert(footer_lines, entry)
+  local footer_keys = type(opts.footer) == "table" and opts.footer or {
+    { "Enter", "open" }, { "↑↓", "move" }, { "/", "search" }, { "Esc", "unfocus" }, { "2×Esc", "close" }, { "C-d/u", "half" }, { "BS", "erase" },
+  }
+  local title_text = opts.prompt and vim.trim(tostring(opts.prompt):gsub(":%s*$", "")) or nil
+  local function dialog_title()
+    if not title_text then
+      return nil
     end
-  end
-  for index, line in ipairs(footer_lines) do
-    local padding = math.max(0, math.floor((width - vim.fn.strdisplaywidth(line)) / 2))
-    footer_lines[index] = string.rep(" ", padding) .. line
+    return { { " " .. title_text .. " ", "UiFloatTitle" }, { string.format("%d ", #items), "UiFloatMuted" } }
   end
   local initial_index = tonumber(opts.initial_index) or 1
   local selected = #items > 0 and math.max(1, math.min(#items, initial_index)) or 0
   local top = math.max(1, selected - math.max(1, height - 2) + 1)
 
   local buf = vim.api.nvim_create_buf(false, true)
-  local footer_buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].filetype = vim.bo[0].filetype
-  vim.bo[footer_buf].modifiable = false
-  vim.bo[footer_buf].bufhidden = "wipe"
 
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "win",
@@ -4872,36 +4873,25 @@ open_file_symbol_dialog = function(source_items, opts, on_choice)
     width = width,
     height = height,
     border = "rounded",
-    style = "minimal",
-  })
-  local footer_win = vim.api.nvim_open_win(footer_buf, false, {
-    relative = "win",
-    win = base_win,
-    row = row + height + 1,
-    col = col,
-    width = width,
-    height = #footer_lines,
-    border = "rounded",
+    title = dialog_title(),
+    title_pos = title_text and "left" or nil,
+    footer = ui.float_footer(footer_keys, true, width - 2),
+    footer_pos = "right",
     style = "minimal",
   })
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
+  vim.wo[win].signcolumn = "yes:1"
   vim.wo[win].cursorline = false
   vim.wo[win].wrap = false
-  vim.wo[win].winhighlight = "Normal:PiPickerNormal,FloatBorder:PiPickerBorder"
-  vim.wo[footer_win].number = false
-  vim.wo[footer_win].relativenumber = false
-  vim.wo[footer_win].signcolumn = "no"
-  vim.wo[footer_win].wrap = false
-  vim.wo[footer_win].winhighlight = "Normal:PiPickerMuted,FloatBorder:PiPickerBorder"
+  vim.wo[win].winhighlight = ui.float_highlight
 
   local function fit(text)
     text = tostring(text):gsub("\t", "  ")
-    if vim.fn.strdisplaywidth(text) <= width - 2 then
+    if vim.fn.strdisplaywidth(text) <= width - 3 then
       return text
     end
-    return vim.fn.strcharpart(text, 0, width - 4) .. "..."
+    return vim.fn.strcharpart(text, 0, width - 4) .. "…"
   end
 
   local function render()
@@ -4917,21 +4907,23 @@ open_file_symbol_dialog = function(source_items, opts, on_choice)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     vim.api.nvim_buf_clear_namespace(buf, symbol_dialog_namespace, 0, -1)
     vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
-
-    vim.api.nvim_set_option_value("modifiable", true, { buf = footer_buf })
-    vim.api.nvim_buf_set_lines(footer_buf, 0, -1, false, footer_lines)
-    vim.api.nvim_set_option_value("modifiable", false, { buf = footer_buf })
+    if title_text and vim.api.nvim_win_is_valid(win) then
+      pcall(vim.api.nvim_win_set_config, win, { title = dialog_title(), title_pos = "left" })
+    end
 
     vim.api.nvim_buf_set_extmark(buf, symbol_dialog_namespace, 0, 0, {
       line_hl_group = "SymbolDialogPrompt",
       end_col = #lines[1],
       hl_group = filter_query == "" and "SymbolDialogPrompt" or "SymbolDialogPromptText",
+      sign_text = "›",
+      sign_hl_group = filter_mode and "UiFloatAccent" or "UiFloatMuted",
       priority = 90,
     })
     if not filter_mode then
       vim.api.nvim_buf_add_highlight(buf, symbol_dialog_namespace, "SymbolDialogMuted", 0, 0, -1)
     end
-    vim.api.nvim_buf_add_highlight(buf, symbol_dialog_namespace, "SymbolDialogMuted", 1, 0, -1)
+    vim.api.nvim_buf_add_highlight(buf, symbol_dialog_namespace, "UiFloatBorder", 1, 0, -1)
+    ui.select_bar(buf, selected > 0 and selected - top + 2 or nil)
 
     for row_index = 1, list_height do
       local item_index = top + row_index - 1
@@ -4958,9 +4950,6 @@ open_file_symbol_dialog = function(source_items, opts, on_choice)
   local function close(is_choice)
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
-    end
-    if vim.api.nvim_win_is_valid(footer_win) then
-      vim.api.nvim_win_close(footer_win, true)
     end
     if not is_choice and not completed then
       completed = true
@@ -5228,6 +5217,7 @@ local function searchable_ui_select(source_items, opts, on_choice)
   local prompt = vim.trim(tostring(opts.prompt or opts.title or "item"):gsub(":%s*$", ""))
   local placeholder = opts.placeholder or ("Search " .. prompt:lower() .. "...")
   open_file_symbol_dialog(entries, {
+    prompt = (opts.prompt or opts.title) and prompt or nil,
     placeholder = placeholder,
     width_ratio = opts.width_ratio,
     min_width = opts.min_width,

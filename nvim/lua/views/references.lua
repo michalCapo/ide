@@ -1,8 +1,11 @@
+local ui = require("views.ui")
+
 local M = {}
 
 local namespace = vim.api.nvim_create_namespace("references_view")
 local ERROR_CONTEXT_LINES = 8
-local KEYMAP_STATUSLINE = " [e/#/C-p previous  ]e/*/C-n/C-e next  e/Enter open  o open all  q/Esc close "
+local STATUS_KEYS = { { "]e", "next" }, { "[e", "previous" }, { "Enter", "open" }, { "o", "open all" }, { "q", "close" } }
+local HEADER_MARKER = "  ▾  "
 
 local state = {
   buf = nil,
@@ -23,13 +26,16 @@ local state = {
   project_check_run_id = 0,
 }
 
+-- Shared ui groups carry their own colours, so a transparent colorscheme that
+-- clears Folded, CursorLine or StatusLine backgrounds cannot hide the view.
 local function apply_highlights()
-  vim.api.nvim_set_hl(0, "ReferenceViewHeader", { link = "Folded" })
-  vim.api.nvim_set_hl(0, "ReferenceViewHeaderMarker", { link = "Folded" })
-  vim.api.nvim_set_hl(0, "ReferenceViewHeaderFile", { link = "Title", bold = true })
-  vim.api.nvim_set_hl(0, "ReferenceViewHeaderPath", { link = "Comment" })
-  vim.api.nvim_set_hl(0, "ReferenceViewHeaderAction", { link = "Folded" })
-  vim.api.nvim_set_hl(0, "ReferenceViewHeaderKey", { link = "Identifier" })
+  ui.ensure_highlights()
+  vim.api.nvim_set_hl(0, "ReferenceViewHeader", { link = "UiHeader" })
+  vim.api.nvim_set_hl(0, "ReferenceViewHeaderMarker", { link = "UiHeaderDot" })
+  vim.api.nvim_set_hl(0, "ReferenceViewHeaderFile", { link = "UiHeaderTitle" })
+  vim.api.nvim_set_hl(0, "ReferenceViewHeaderPath", { link = "UiHeader" })
+  vim.api.nvim_set_hl(0, "ReferenceViewHeaderAction", { link = "UiHeader" })
+  vim.api.nvim_set_hl(0, "ReferenceViewHeaderKey", { link = "UiKey" })
   vim.api.nvim_set_hl(0, "ReferenceViewGap", { link = "Normal" })
   vim.api.nvim_set_hl(0, "ReferenceViewHit", {
     bg = vim.o.background == "light" and "#ffd6a0" or "#6b4300",
@@ -39,7 +45,7 @@ local function apply_highlights()
   vim.api.nvim_set_hl(0, "ReferenceViewLine", { link = "Normal" })
   -- Preserve source syntax while giving error rows the same subtle background
   -- as the active line in a regular editing buffer.
-  vim.api.nvim_set_hl(0, "ReferenceViewErrorLine", { link = "CursorLine" })
+  vim.api.nvim_set_hl(0, "ReferenceViewErrorLine", { link = "UiSelectInactive" })
   vim.api.nvim_set_hl(0, "ReferenceViewErrorMessage", { link = "DiagnosticVirtualTextError" })
   vim.api.nvim_set_hl(0, "ReferenceViewSeparator", { link = "NonText" })
 end
@@ -78,8 +84,9 @@ end
 function _G.nvim_reference_view_statusline()
   local win = tonumber(vim.g.statusline_winid) or vim.api.nvim_get_current_win()
   local ok, buf = pcall(vim.api.nvim_win_get_buf, win)
+  local mode = state.label:upper()
   if not ok or state.buf ~= buf or #state.targets == 0 then
-    return KEYMAP_STATUSLINE
+    return ui.status(mode, {}, STATUS_KEYS)
   end
 
   local cursor = vim.api.nvim_win_get_cursor(win)
@@ -100,7 +107,11 @@ function _G.nvim_reference_view_statusline()
   end
 
   local noun = #state.targets == 1 and "occurrence" or "occurrences"
-  return KEYMAP_STATUSLINE .. "%=" .. string.format(" %d/%d %s ", current, #state.targets, noun)
+  return ui.status(mode, {
+    { string.format("  %d/%d ", current, #state.targets), "UiStatusStrong" },
+    { noun .. "   ", "UiStatusMuted" },
+    { vim.fn.fnamemodify(state.root or "", ":~"), "UiStatusDim", true },
+  }, STATUS_KEYS)
 end
 
 local function remember_window_options(win)
@@ -355,7 +366,7 @@ local function add_header(lines, file, file_index)
   local name = parts[#parts] or file.path
   local parent = #parts > 1 and table.concat(parts, "/", 1, #parts - 1) .. "/" or "./"
   local context = context_for_line(file.lines, file.targets[1] and file.targets[1].line or 1)
-  local header = "  v  " .. name .. "  " .. parent
+  local header = HEADER_MARKER .. name .. "  " .. parent
   if context ~= "" then
     header = header .. "  " .. context
   end
@@ -368,7 +379,7 @@ local function add_header(lines, file, file_index)
     col = file.targets[1] and file.targets[1].byte_col or 0,
     file_index = file_index,
   }
-  return row, #("  v  "), #name, #parent
+  return row, #HEADER_MARKER, #name, #parent
 end
 
 local function prepare_target_columns(file)
@@ -529,8 +540,6 @@ local function render(files, title, scheme)
     gaps[#lines] = true
     table.insert(headers, {
       row = header_row,
-      top_row = header_row - 1,
-      bottom_row = header_row + 1,
       name_start = name_start,
       name_end = name_start + name_len,
       parent_start = name_start + name_len + 2,
@@ -619,15 +628,9 @@ local function render(files, title, scheme)
 
   for _, header in ipairs(headers) do
     local row = header.row - 1
-    for _, padded_row in ipairs({ header.top_row, header.bottom_row }) do
-      vim.api.nvim_buf_set_extmark(buf, namespace, padded_row - 1, 0, {
-        line_hl_group = "ReferenceViewHeader",
-        priority = 120,
-      })
-    end
     vim.api.nvim_buf_set_extmark(buf, namespace, row, 0, {
       line_hl_group = "ReferenceViewHeader",
-      virt_text = { { " Open File ", "ReferenceViewHeaderAction" }, { "e", "ReferenceViewHeaderKey" } },
+      virt_text = { { " e ", "ReferenceViewHeaderKey" }, { " open file ", "ReferenceViewHeaderAction" } },
       virt_text_pos = "right_align",
       priority = 120,
     })
