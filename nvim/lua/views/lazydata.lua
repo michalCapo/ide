@@ -1,3 +1,4 @@
+local ui = require("views.ui")
 local M = {}
 local TABLE_PAGE_SIZE = 30
 
@@ -15,6 +16,7 @@ local ns = vim.api.nvim_create_namespace("lazydata")
 local form_ns = vim.api.nvim_create_namespace("lazydata_form")
 local picker_ns = vim.api.nvim_create_namespace("lazydata_picker")
 local prompt_ns = vim.api.nvim_create_namespace("lazydata_prompt")
+local highlight_cell
 local configure, cancel_request, switch_workspace, close_workspace, quit, focus, open_picker, open_query, jump_to_column, open_value_viewer, edit_table_cells, save_table_edits, discard_table_edits, value_filetype, workspace, connect_profile, decorate
 
 local function session_path()
@@ -75,8 +77,8 @@ local function notify(message, level, preformatted, custom_title)
   vim.api.nvim_buf_set_lines(buf,0,-1,false,display);vim.bo[buf].modifiable=false
   local title=custom_title or(level>=vim.log.levels.ERROR and" LazyData error "or level>=vim.log.levels.WARN and" LazyData warning "or" LazyData ")
   local return_win=vim.api.nvim_get_current_win()
-  local win=vim.api.nvim_open_win(buf,true,{relative="editor",style="minimal",border="rounded",title=title,title_pos="center",footer=" Enter/Esc/q/b close ",footer_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=80})
-  vim.wo[win].wrap=true;vim.wo[win].linebreak=true;vim.wo[win].cursorline=false;vim.wo[win].number=false;vim.wo[win].relativenumber=false;vim.wo[win].signcolumn="no"
+  local win=vim.api.nvim_open_win(buf,true,{relative="editor",style="minimal",border="rounded",title=ui.float_title(title,level>=vim.log.levels.ERROR and"UiFloatError"or level>=vim.log.levels.WARN and"UiFloatWarn"or nil),title_pos="left",footer=ui.float_footer({{"Enter/Esc/q/b","close"}}),footer_pos="right",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=80})
+  vim.wo[win].winhighlight=ui.float_highlight;vim.wo[win].wrap=true;vim.wo[win].linebreak=true;vim.wo[win].cursorline=false;vim.wo[win].number=false;vim.wo[win].relativenumber=false;vim.wo[win].signcolumn="no"
   local dialog={buf=buf,win=win,return_win=return_win};S.message_dialog=dialog
   local function close_dialog()
     if S.message_dialog~=dialog then return end;S.message_dialog=nil
@@ -90,8 +92,8 @@ local function prompt_config(width, height, title)
   width = math.max(28, math.min(width, math.max(28, vim.o.columns - 4)))
   height = math.max(3, math.min(height, math.max(3, vim.o.lines - vim.o.cmdheight - 4)))
   return {
-    relative = "editor", style = "minimal", border = "rounded", title = title,
-    title_pos = "center", width = width, height = height,
+    relative = "editor", style = "minimal", border = "rounded", title = ui.float_title(title),
+    title_pos = "left", width = width, height = height,
     row = math.max(1, math.floor((vim.o.lines - vim.o.cmdheight - height) / 2)),
     col = math.max(1, math.floor((vim.o.columns - width) / 2)), zindex = 90,
   }
@@ -111,6 +113,7 @@ local function create_prompt(title, width, height)
   local prompt = { buf = buf, return_win = vim.api.nvim_get_current_win() }
   prompt.win = vim.api.nvim_open_win(buf, true, prompt_config(width, height, title))
   S.prompt = prompt
+  vim.wo[prompt.win].winhighlight = ui.float_highlight
   vim.wo[prompt.win].wrap = false; vim.wo[prompt.win].cursorline = false
   vim.wo[prompt.win].number = false; vim.wo[prompt.win].relativenumber = false; vim.wo[prompt.win].signcolumn = "no"
   return prompt
@@ -225,17 +228,27 @@ local function input(label, default, secret)
 end
 
 local function setup_highlights()
+  ui.setup_highlights()
   local hl = vim.api.nvim_set_hl
-  hl(0, "LazyDataAccent", { link = "Added" })
-  hl(0, "LazyDataMuted", { link = "Comment" })
-  hl(0, "LazyDataHeader", { link = "Title" })
-  hl(0, "LazyDataNull", { link = "DiagnosticWarn" })
-  hl(0, "LazyDataError", { link = "DiagnosticError" })
-  hl(0, "LazyDataSuccess", { link = "DiagnosticOk" })
-  hl(0, "LazyDataSelected", { link = "Visual" })
+  hl(0, "LazyDataAccent", { link = "UiAccent" })
+  hl(0, "LazyDataMuted", { link = "UiMuted" })
+  hl(0, "LazyDataDim", { link = "UiDim" })
+  hl(0, "LazyDataStrong", { link = "UiStrong" })
+  hl(0, "LazyDataHeader", { fg = ui.palette().fgb, bold = true })
+  hl(0, "LazyDataTableHeader", { link = "UiTableHeader" })
+  hl(0, "LazyDataRule", { link = "UiRule" })
+  hl(0, "LazyDataCell", { link = "UiCell" })
+  hl(0, "LazyDataNull", { link = "UiNull" })
+  hl(0, "LazyDataError", { link = "UiError" })
+  hl(0, "LazyDataSuccess", { link = "UiAdded" })
+  hl(0, "LazyDataSelected", { link = "UiSelect" })
   hl(0, "LazyDataMarked", { link = "Visual" })
   hl(0, "LazyDataChanged", { link = "DiffChange" })
-  hl(0, "LazyDataKey", { link = "Identifier" })
+  hl(0, "LazyDataKey", { link = "UiAccent" })
+  hl(0, "LazyDataReadOnly", { link = "UiReadOnlyText" })
+  hl(0, "LazyDataDriverPostgres", { link = "UiDriverPostgres" })
+  hl(0, "LazyDataDriverSqlServer", { link = "UiDriverSqlServer" })
+  hl(0, "LazyDataDriverSqlite", { link = "UiDriverSqlite" })
 end
 
 local function set_lines(buf, lines, modifiable)
@@ -243,6 +256,7 @@ local function set_lines(buf, lines, modifiable)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, #lines > 0 and lines or { "" })
   vim.bo[buf].modifiable = modifiable == true
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 end
 
 local function make_buf(name, modifiable)
@@ -391,48 +405,113 @@ end
 workspace = function() return S.workspaces[S.workspace_index] end
 
 local function title_tabs()
-  if #S.workspaces == 0 then return " No open tables · Enter opens selected table " end
+  if #S.workspaces == 0 then return "%#UiHeader# No open tables · Enter opens selected table " end
   local parts = {}
   for i, item in ipairs(S.workspaces) do
-    local marker = i == S.workspace_index and "●" or "○"
-    parts[#parts + 1] = string.format(" %s %s ", marker, item.title)
+    if i == S.workspace_index then
+      parts[#parts + 1] = "%#UiTabDot# ● %#UiTabActive#" .. ui.escape(item.title) .. " "
+    else
+      parts[#parts + 1] = "%#UiHeader# " .. ui.escape(item.title) .. " "
+    end
   end
-  return table.concat(parts, "│")
+  return table.concat(parts, "%#UiTabFill#│")
+end
+
+local function status_keys(item)
+  if S.screen == "profiles" then
+    return { { "n", "new" }, { "e", "edit" }, { "d", "delete" }, { "Enter", "connect" }, { "?", "help" } }
+  elseif S.active_panel == "sidebar" or not item then
+    return { { "Enter", "open" }, { "/", "filter" }, { "Ctrl-E", "query" }, { "D", "database" }, { "?", "help" } }
+  elseif item.kind == "query" then
+    return { { "Ctrl-R", "run" }, { "Ctrl-C", "cancel" }, { "[r/]r", "result" }, { "?", "help" } }
+  elseif item.mode == "columns" then
+    return { { "1", "rows" }, { "/", "filter" }, { "c", "column" }, { "?", "help" } }
+  end
+  local pending = false
+  for _, edit in pairs(item.pending_updates or {}) do
+    if next(edit.changes or {}) then pending = true; break end
+  end
+  if pending then
+    return { { "Ctrl-S", "save" }, { "U", "discard" }, { "e", "edit" }, { "?", "help" } }
+  end
+  return { { "/", "filter" }, { "e", "edit" }, { "Space", "mark" }, { "v", "value" }, { "?", "help" } }
+end
+
+local function status_line(loading)
+  local item = S.screen == "workspace" and workspace() or nil
+  local mode, segments = "VIMD", {}
+  local profile = item and item.profile or S.profile
+  if S.screen ~= "profiles" and profile and profile.read_only then segments[#segments + 1] = { " READ-ONLY ", "UiReadOnly" } end
+  if S.screen == "profiles" then
+    segments[#segments + 1] = { "  LazyData", "UiStatusStrong" }
+    segments[#segments + 1] = { "  ·  connections", "UiStatusMuted" }
+  elseif S.active_panel == "sidebar" or not item then
+    segments[#segments + 1] = { "  " .. (profile and profile.name or "Connection"), "UiStatusStrong" }
+    segments[#segments + 1] = { "  ·  " .. (S.database or ""), "UiStatusMuted", true }
+  elseif item.kind == "query" then
+    mode = "SQL"
+    segments[#segments + 1] = { "  " .. item.title, "UiStatusStrong" }
+    if #(item.results or {}) > 1 then
+      segments[#segments + 1] = { string.format("  ·  result %d of %d", item.result_index or 1, #item.results), "UiStatusMuted", true }
+    end
+  else
+    mode = item.mode == "columns" and "COLUMNS" or "ROWS"
+    segments[#segments + 1] = { "  " .. item.title .. "  ", "UiStatusStrong" }
+    segments[#segments + 1] = { "· " .. (item.status_text or ""), "UiStatusMuted", true }
+  end
+  if loading then segments[#segments + 1] = { "   " .. loading, "UiStatusAccent" } end
+  return ui.status(mode, segments, status_keys(item))
+end
+
+local function decorate_window(win, active, editing)
+  if not win or not vim.api.nvim_win_is_valid(win) then return end
+  ui.panel_window(win, active)
+  if editing then
+    vim.wo[win].winhighlight = vim.wo[win].winhighlight:gsub("CursorLine:[%w]+", "CursorLine:UiSelectInactive")
+  end
+  ui.update_select_bar(vim.api.nvim_win_get_buf(win))
 end
 
 decorate = function()
   local loading = loading_message()
-  local busy = loading and "  " .. loading or ""
+  local status = status_line(loading)
+  vim.go.statusline = status
+  for _, panel in ipairs({ S.sidebar, S.main, S.result }) do
+    if panel.win and vim.api.nvim_win_is_valid(panel.win) then vim.wo[panel.win].statusline = status end
+  end
   if S.screen == "profiles" then
     if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
-      vim.wo[S.main.win].winbar = " LazyData · Connections" .. busy .. " %= n new · e edit · d delete · Enter connect · ? help "
-      vim.wo[S.main.win].winhighlight = "WinBar:LazyDataAccent,WinBarNC:LazyDataMuted"
+      vim.wo[S.main.win].winbar = ui.header("Connections", true, string.format("%d saved", #S.profiles))
+      decorate_window(S.main.win, true)
     end
     return
   end
   if S.sidebar.win and vim.api.nvim_win_is_valid(S.sidebar.win) then
-    local focus = S.active_panel == "sidebar" and "LazyDataAccent" or "LazyDataMuted"
-    vim.wo[S.sidebar.win].winbar = " " .. (S.profile and S.profile.name or "Connection") .. " · " .. (S.database or "") .. busy .. " %=" .. #S.tables .. " tables "
-    vim.wo[S.sidebar.win].winhighlight = "WinBar:" .. focus .. ",WinBarNC:LazyDataMuted"
+    local title = (S.profile and S.profile.name or "Connection") .. " · " .. (S.database or "")
+    vim.wo[S.sidebar.win].winbar = ui.header(title, S.active_panel == "sidebar", #S.tables .. " tables")
+    decorate_window(S.sidebar.win, S.active_panel == "sidebar")
   end
-  if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
-    local focus = S.active_panel == "main" and "LazyDataAccent" or "LazyDataMuted"
-    vim.wo[S.main.win].winbar = title_tabs() .. (loading and " %= " .. loading .. " " or "")
-    vim.wo[S.main.win].winhighlight = "WinBar:" .. focus .. ",WinBarNC:LazyDataMuted"
+  if S.main.win and vim.api.nvim_win_is_valid(S.main.win) and S.main.win ~= S.sidebar.win then
+    vim.wo[S.main.win].winbar = title_tabs() .. "%#UiHeader#%<%=" .. (loading and ui.escape(loading) .. " " or "")
+    local item = workspace()
+    decorate_window(S.main.win, S.active_panel == "main", item and item.kind == "query")
   end
   if S.result.win and vim.api.nvim_win_is_valid(S.result.win) then
     local item=workspace();local suffix=item and item.kind=="query"and #(item.results or {})>1 and string.format(" · %d/%d",item.result_index or 1,#item.results)or""
-    vim.wo[S.result.win].winbar = " Results" .. suffix .. (loading and " · " .. loading or "") .. " "
-    vim.wo[S.result.win].winhighlight = "WinBar:" .. (S.active_panel == "result" and "LazyDataAccent" or "LazyDataMuted") .. ",WinBarNC:LazyDataMuted"
+    vim.wo[S.result.win].winbar = ui.header("Results" .. suffix, S.active_panel == "result", loading)
+    decorate_window(S.result.win, S.active_panel == "result")
   end
 end
 
 local function configure_window(win)
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
+  vim.wo[win].signcolumn = "yes:1"
   vim.wo[win].wrap = false
   vim.wo[win].cursorline = true
+  if not vim.w[win].lazydata_rule_match then
+    vim.w[win].lazydata_rule_match = vim.fn.matchadd("LazyDataRule", "[│─┼]", 5, -1, { window = win })
+  end
 end
 
 local function render_profiles()
@@ -440,15 +519,32 @@ local function render_profiles()
   S.profile_index = math.max(1, math.min(S.profile_index, math.max(1, #visible)))
   local lines = {}
   if S.profile_filter ~= "" then lines[#lines + 1] = "  Filter: " .. S.profile_filter; lines[#lines + 1] = "" end
+  local spans = {}
   if #visible == 0 then
     lines[#lines + 1] = #S.profiles == 0 and "  No connections yet. Press n to create one." or "  No matching connections."
+    spans[#spans + 1] = { #lines, "LazyDataNull", 0, -1 }
   else
     for _, p in ipairs(visible) do
-      local detail = p.driver == "sqlite" and p.path or string.format("%s@%s:%s/%s", p.user or "", p.host or "", p.port or "", p.database or "")
-      lines[#lines + 1] = string.format("  %-22s  %-8s  %s%s", p.name, p.driver, detail, p.read_only and "  [read-only]" or "")
+      local detail = p.driver == "sqlite" and (p.path and vim.fn.fnamemodify(p.path, ":~") or "") or string.format("%s@%s:%s/%s", p.user or "", p.host or "", p.port or "", p.database or "")
+      local name = string.format("  %-22s  ", p.name)
+      local driver = string.format("● %-9s  ", p.driver)
+      local line = name .. driver .. detail
+      lines[#lines + 1] = line
+      local dot = p.driver == "postgres" and "LazyDataDriverPostgres" or (p.driver == "mssql" or p.driver == "sqlserver") and "LazyDataDriverSqlServer"
+        or p.driver == "sqlite" and "LazyDataDriverSqlite" or "LazyDataMuted"
+      spans[#spans + 1] = { #lines, "LazyDataStrong", 2, #name }
+      spans[#spans + 1] = { #lines, dot, #name, #name + #"●" }
+      spans[#spans + 1] = { #lines, "LazyDataMuted", #name + #driver, #line }
+      if p.read_only then
+        lines[#lines] = line .. "  read-only"
+        spans[#spans + 1] = { #lines, "LazyDataReadOnly", #line + 2, -1 }
+      end
     end
   end
   set_lines(S.main.buf, lines)
+  for _, span in ipairs(spans) do
+    pcall(vim.api.nvim_buf_set_extmark, S.main.buf, ns, span[1] - 1, span[3], { end_col = span[4] == -1 and #lines[span[1]] or span[4], hl_group = span[2] })
+  end
   if S.main.win and vim.api.nvim_win_is_valid(S.main.win) then
     local row = S.profile_index + (S.profile_filter ~= "" and 2 or 0)
     pcall(vim.api.nvim_win_set_cursor, S.main.win, { math.max(row, 1), 0 })
@@ -462,8 +558,11 @@ local function render_tables()
   local lines = {}
   if S.table_filter ~= "" then lines[#lines + 1] = "  / " .. S.table_filter; lines[#lines + 1] = "" end
   if #visible == 0 then lines[#lines + 1] = "  No matching tables." end
-  for _, t in ipairs(visible) do lines[#lines + 1] = "  " .. (t.schema ~= "" and t.schema .. "." or "") .. t.name end
+  local first_table = #lines + 1
+  for _, t in ipairs(visible) do lines[#lines + 1] = "  ▦ " .. (t.schema ~= "" and t.schema .. "." or "") .. t.name end
   set_lines(S.sidebar.buf, lines)
+  for row = 1, first_table - 1 do pcall(vim.api.nvim_buf_set_extmark, S.sidebar.buf, ns, row - 1, 0, { end_col = #lines[row], hl_group = "LazyDataMuted" }) end
+  for row = first_table, #lines do pcall(vim.api.nvim_buf_set_extmark, S.sidebar.buf, ns, row - 1, 2, { end_col = 2 + #"▦", hl_group = "LazyDataDim" }) end
   if S.sidebar.win and vim.api.nvim_win_is_valid(S.sidebar.win) then
     pcall(vim.api.nvim_win_set_cursor, S.sidebar.win, { S.table_index + (S.table_filter ~= "" and 2 or 0), 0 })
   end
@@ -502,11 +601,31 @@ local function render_result_set(buf, result)
   for _, row in ipairs(rows) do
     for i, value in ipairs(row) do widths[i] = math.min(32, math.max(widths[i], vim.fn.strdisplaywidth(value_text(value)))) end
   end
-  local function line(row)
-    local cells = {}
+  -- Columns that hold only numbers are aligned to the right.
+  local numeric = {}
+  for i = 1, #columns do
+    local seen, only_numbers = false, true
+    for _, row in ipairs(rows) do
+      local value = row[i]
+      if value ~= nil and value ~= vim.NIL then
+        if type(value) ~= "number" then only_numbers = false; break end
+        seen = true
+      end
+    end
+    numeric[i] = seen and only_numbers
+  end
+  local nulls = {}
+  local function line(row, row_number)
+    local cells, byte = {}, #" "
     for i, value in ipairs(row) do
       local text = value_text(value)
-      cells[i] = text .. string.rep(" ", math.max(0, widths[i] - vim.fn.strdisplaywidth(text)))
+      local gap = string.rep(" ", math.max(0, widths[i] - vim.fn.strdisplaywidth(text)))
+      cells[i] = numeric[i] and gap .. text or text .. gap
+      if row_number and value == vim.NIL then
+        local first = byte + (numeric[i] and #gap or 0)
+        nulls[#nulls + 1] = { row_number, first, first + #text }
+      end
+      byte = byte + #cells[i] + #" │ "
     end
     return " " .. table.concat(cells, " │ ") .. " "
   end
@@ -514,11 +633,14 @@ local function render_result_set(buf, result)
   local rule = {}
   for i, width in ipairs(widths) do rule[i] = string.rep("─", width) end
   lines[#lines + 1] = "─" .. table.concat(rule, "─┼─") .. "─"
-  for _, row in ipairs(rows) do lines[#lines + 1] = line(row) end
+  for _, row in ipairs(rows) do lines[#lines + 1] = line(row, #lines) end
   if #rows == 0 then lines[#lines + 1] = "  No rows." end
   set_lines(buf, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  pcall(vim.api.nvim_buf_add_highlight, buf, ns, "LazyDataHeader", 0, 0, -1)
+  pcall(vim.api.nvim_buf_set_extmark, buf, ns, 0, 0, { line_hl_group = "LazyDataTableHeader", priority = 1 })
+  for _, null in ipairs(nulls) do
+    pcall(vim.api.nvim_buf_set_extmark, buf, ns, null[1], null[2], { end_col = null[3], hl_group = "LazyDataNull" })
+  end
   local starts, ends, col = {}, {}, 1
   for i, width in ipairs(widths) do
     starts[i], ends[i], col = col, col + width, col + width + 3
@@ -633,7 +755,8 @@ local function reveal_active_column(item)
   local start_col=(item.cell_starts or{})[index]
   local end_col=(item.cell_ends or{})[index]
   if not start_col or not end_col then return end
-  local width=vim.api.nvim_win_get_width(win)
+  local info=vim.fn.getwininfo(win)[1]
+  local width=vim.api.nvim_win_get_width(win)-(info and info.textoff or 0)
   vim.api.nvim_win_call(win,function()
     local view=vim.fn.winsaveview()
     if start_col<view.leftcol then
@@ -645,6 +768,23 @@ local function reveal_active_column(item)
     end
     vim.fn.winrestview(view)
   end)
+end
+
+local cell_ns = vim.api.nvim_create_namespace("lazydata_cell")
+
+-- Highlights the active cell on the cursor row of a table in rows mode.
+highlight_cell = function(item)
+  if not item or not vim.api.nvim_buf_is_valid(item.buf) then return end
+  vim.api.nvim_buf_clear_namespace(item.buf, cell_ns, 0, -1)
+  local win = S.main.win
+  if item.mode ~= "rows" or not win or not vim.api.nvim_win_is_valid(win) or vim.api.nvim_win_get_buf(win) ~= item.buf then return end
+  local row = vim.api.nvim_win_get_cursor(win)[1]
+  local start_col, end_col = (item.cell_starts or {})[item.active_col or 1], (item.cell_ends or {})[item.active_col or 1]
+  local text = vim.api.nvim_buf_get_lines(item.buf, row - 1, row, false)[1] or ""
+  if row < 3 or not start_col or not end_col or #((item.data or {}).rows or {}) == 0 then return end
+  local first = cell_byte_col(win, row, math.max(0, start_col - 1))
+  local last = math.min(#text, cell_byte_col(win, row, end_col) + 1)
+  pcall(vim.api.nvim_buf_set_extmark, item.buf, cell_ns, row - 1, first, { end_col = last, hl_group = "LazyDataCell", priority = 200 })
 end
 
 local function render_table(item)
@@ -679,12 +819,20 @@ local function render_table(item)
     end
     reveal_active_column(item)
     local sort = item.sort_column and item.sort_direction and " · sort " .. item.sort_column .. " " .. (item.sort_direction == "asc" and "↑" or "↓") or ""
-    local mode = item.mode == "columns" and "columns" or item.loading_rows and "rows · executing query…" or string.format("rows · page %d%s%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "", sort)
+    local mode = item.mode == "columns" and "" or item.loading_rows and "executing query…" or string.format("page %d%s%s", (item.page or 0) + 1, item.data and item.data.has_more and "+" or "", sort)
     local column = item.columns and item.columns[item.active_col or 1]
     local marked = item.mode == "rows" and vim.tbl_count(item.marked_rows or {}) or 0
     local edited_rows, edited_fields = pending_edit_stats(item)
-    local edited = edited_fields > 0 and string.format("  changed: %d field%s / %d row%s · Ctrl-S save · U discard", edited_fields, edited_fields == 1 and "" or "s", edited_rows, edited_rows == 1 and "" or "s") or ""
-    vim.wo[S.main.win].statusline = " " .. item.title:gsub("%%", "%%%%") .. "  " .. mode .. (column and "  column: " .. column.name:gsub("%%", "%%%%") or "") .. (marked > 0 and "  marked: " .. marked or "") .. edited .. "  filter: " .. filter_summary(item):gsub("%%", "%%%%") .. " "
+    local parts = {}
+    if mode ~= "" then parts[#parts + 1] = mode end
+    if column then parts[#parts + 1] = "column: " .. column.name end
+    if marked > 0 then parts[#parts + 1] = "marked: " .. marked end
+    if edited_fields > 0 then
+      parts[#parts + 1] = string.format("changed: %d field%s / %d row%s", edited_fields, edited_fields == 1 and "" or "s", edited_rows, edited_rows == 1 and "" or "s")
+    end
+    parts[#parts + 1] = "filter: " .. filter_summary(item)
+    item.status_text = table.concat(parts, "  ·  ")
+    highlight_cell(item)
   end
   decorate()
 end
@@ -811,6 +959,8 @@ local function open_table(restored)
     marked_rows={}, pending_updates={}, buf=make_buf("table/"..label, false) }
   configure(item.buf)
   set_main_buffer_maps(item.buf)
+  vim.api.nvim_create_autocmd("CursorMoved", { group = S.group, buffer = item.buf, callback = function() highlight_cell(item) end })
+  ui.attach_select_bar(item.buf)
   S.workspaces[#S.workspaces + 1] = item; S.workspace_index = #S.workspaces; S.active_panel = "main"
   M.apply_layout(true); load_columns(item, function() load_rows(item) end)
 end
@@ -970,7 +1120,7 @@ end
 
 local function form_float_config(form,height)
   local width=math.max(24,math.min(72,vim.o.columns-4));height=math.max(5,math.min(height,vim.o.lines-vim.o.cmdheight-4))
-  return {relative="editor",style="minimal",border="rounded",title=form.values.id and" Edit connection "or" New connection ",title_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=60}
+  return {relative="editor",style="minimal",border="rounded",title=ui.float_title(form.values.id and"Edit connection"or"New connection"),title_pos="left",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=60}
 end
 
 render_form = function(form)
@@ -1084,7 +1234,7 @@ local function profile_form(existing)
   if S.form then close_form(S.form)end
   existing=vim.deepcopy(existing or{});local driver=existing.driver or"postgres"
   local form={index=1,status="Ready",status_kind="muted",values={id=existing.id,driver=driver,name=existing.name or"",host=existing.host or"localhost",port=tostring(existing.port or(driver=="mssql"and 1433 or 5432)),user=existing.user or"",password=existing.password or"",database=existing.database or"",path=existing.path or"",ssl_mode=existing.ssl_mode or"prefer",encrypt=existing.encrypt==true,trust_server_certificate=existing.trust_server_certificate==true,read_only=existing.read_only==true,timeout_ms=existing.timeout_ms or 30000}}
-  form.buf=make_buf("connection-form",false);form.win=vim.api.nvim_open_win(form.buf,true,form_float_config(form,18));S.form=form
+  form.buf=make_buf("connection-form",false);form.win=vim.api.nvim_open_win(form.buf,true,form_float_config(form,18));vim.wo[form.win].winhighlight=ui.float_highlight;S.form=form
   vim.wo[form.win].cursorline=false;vim.wo[form.win].number=false;vim.wo[form.win].relativenumber=false;vim.wo[form.win].signcolumn="no";vim.wo[form.win].wrap=false;vim.wo[form.win].conceallevel=2;vim.wo[form.win].concealcursor="niv"
   local opts={buffer=form.buf,silent=true,nowait=true}
   vim.keymap.set("n","j",function()move_form(form,1)end,opts);vim.keymap.set("n","k",function()move_form(form,-1)end,opts);vim.keymap.set("n","<Tab>",function()move_form(form,1)end,opts);vim.keymap.set("n","<S-Tab>",function()move_form(form,-1)end,opts)
@@ -1301,7 +1451,7 @@ end
 local function cell_editor_config(editor)
   local width=math.max(32,math.min(100,vim.o.columns-6))
   local height=math.max(6,math.min(24,vim.o.lines-vim.o.cmdheight-6))
-  return {relative="editor",style="minimal",border="rounded",title=string.format(" Edit %s · %d %s ",editor.column.name,#editor.targets,#editor.targets==1 and"row"or"rows"),title_pos="center",footer=" Ctrl-S stage · Ctrl-N set NULL · Esc cancel ",footer_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=70}
+  return {relative="editor",style="minimal",border="rounded",title=ui.float_title(string.format(" Edit %s · %d %s ",editor.column.name,#editor.targets,#editor.targets==1 and"row"or"rows")),title_pos="left",footer=ui.float_footer({{"Ctrl-S","stage"},{"Ctrl-N","set NULL"},{"Esc","cancel"}},true),footer_pos="right",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=70}
 end
 
 local function close_cell_editor(editor)
@@ -1367,7 +1517,7 @@ edit_table_cells = function()
   editor.buf=make_buf("cell-editor/"..item.title.."/"..column.name,true)
   local lines=vim.split(text,"\n",{plain=true});if #lines==0 then lines={""}end
   vim.api.nvim_buf_set_lines(editor.buf,0,-1,false,lines);vim.bo[editor.buf].modified=false
-  editor.win=vim.api.nvim_open_win(editor.buf,true,cell_editor_config(editor));S.cell_editor=editor
+  editor.win=vim.api.nvim_open_win(editor.buf,true,cell_editor_config(editor));vim.wo[editor.win].winhighlight=ui.float_highlight;S.cell_editor=editor
   vim.wo[editor.win].number=true;vim.wo[editor.win].relativenumber=false;vim.wo[editor.win].signcolumn="no";vim.wo[editor.win].wrap=false
   vim.bo[editor.buf].filetype=value_filetype and value_filetype(column,text)or"text"
   local opts={buffer=editor.buf,silent=true,nowait=true}
@@ -1414,7 +1564,7 @@ end
 
 local function picker_config(picker,height)
   local width=math.max(24,math.min(math.max(64,picker.hint_width or 0),math.min(76,vim.o.columns-4)));height=math.max(5,math.min(height,vim.o.lines-vim.o.cmdheight-4))
-  return {relative="editor",style="minimal",border="rounded",title=" "..picker.title.." ",title_pos="center",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=65}
+  return {relative="editor",style="minimal",border="rounded",title=ui.float_title(picker.title),title_pos="left",width=width,height=height,row=math.max(1,math.floor((vim.o.lines-vim.o.cmdheight-height)/2)),col=math.max(1,math.floor((vim.o.columns-width)/2)),zindex=65}
 end
 
 render_picker = function(picker)
@@ -1450,7 +1600,7 @@ end
 open_picker = function(title,items,format,choose,start_filter,options)
   if S.picker then close_picker(S.picker)end
   options=options or{}
-  local picker={title=title,items=items or{},format=format or tostring,choose=choose,filter="",index=1,first=1,return_win=vim.api.nvim_get_current_win(),select_label=options.select_label,action_hint=options.action_hint};picker.hint_width=picker.action_hint and vim.fn.strdisplaywidth("  type filter · Ctrl-N/P move · "..picker.action_hint.." · Enter "..(picker.select_label or"select").." · Esc cancel")+2 or 0;picker.buf=make_buf("picker",false);picker.win=vim.api.nvim_open_win(picker.buf,true,picker_config(picker,10));S.picker=picker
+  local picker={title=title,items=items or{},format=format or tostring,choose=choose,filter="",index=1,first=1,return_win=vim.api.nvim_get_current_win(),select_label=options.select_label,action_hint=options.action_hint};picker.hint_width=picker.action_hint and vim.fn.strdisplaywidth("  type filter · Ctrl-N/P move · "..picker.action_hint.." · Enter "..(picker.select_label or"select").." · Esc cancel")+2 or 0;picker.buf=make_buf("picker",false);picker.win=vim.api.nvim_open_win(picker.buf,true,picker_config(picker,10));vim.wo[picker.win].winhighlight=ui.float_highlight;S.picker=picker
   vim.wo[picker.win].cursorline=false;vim.wo[picker.win].number=false;vim.wo[picker.win].relativenumber=false;vim.wo[picker.win].signcolumn="no";vim.wo[picker.win].wrap=false;vim.wo[picker.win].virtualedit="onemore"
   local opts={buffer=picker.buf,silent=true,nowait=true}
   local function move_picker(delta)picker.index=math.max(1,math.min(#picker.filtered,picker.index+delta));render_picker(picker)end
@@ -1490,7 +1640,7 @@ end
 
 local function viewer_config(column)
   local width=math.max(1,vim.o.columns-6);local height=math.max(3,vim.o.lines-vim.o.cmdheight-5)
-  return {relative="editor",style="minimal",border="rounded",title=" "..column.name.." ",title_pos="center",footer=" q/Esc close · = format · yy copy line · visual y copy selection ",footer_pos="center",width=width,height=height,row=1,col=2,zindex=70}
+  return {relative="editor",style="minimal",border="rounded",title=ui.float_title(column.name),title_pos="left",footer=ui.float_footer({{"q/Esc","close"},{"=","format"},{"yy","copy line"},{"v y","copy selection"}}),footer_pos="right",width=width,height=height,row=1,col=2,zindex=70}
 end
 
 local value_type_filetypes={json="json",jsonb="json",xml="xml",html="html",yaml="yaml",yml="yaml",toml="toml",sql="sql",markdown="markdown",md="markdown",javascript="javascript",typescript="typescript",lua="lua",css="css",scss="scss",bash="bash",shell="sh",csv="csv"}
@@ -1584,7 +1734,7 @@ open_value_viewer = function()
   if filetype~="text"and vim.treesitter and vim.treesitter.start then pcall(vim.treesitter.start,viewer.buf,filetype)end
   viewer.win=vim.api.nvim_open_win(viewer.buf,true,viewer_config(column));S.viewer=viewer
   vim.wo[viewer.win].number=#lines>1;vim.wo[viewer.win].relativenumber=false;vim.wo[viewer.win].signcolumn="no";vim.wo[viewer.win].wrap=true;vim.wo[viewer.win].linebreak=true;vim.wo[viewer.win].breakindent=true;vim.wo[viewer.win].cursorline=false
-  vim.wo[viewer.win].winhighlight="Normal:Normal,NormalNC:Normal,FloatBorder:FloatBorder,FloatTitle:Title,EndOfBuffer:EndOfBuffer"
+  vim.wo[viewer.win].winhighlight="Normal:Normal,NormalNC:Normal,FloatBorder:UiFloatBorder,FloatTitle:UiFloatTitle,FloatFooter:UiFloatMuted,EndOfBuffer:EndOfBuffer"
   local function close_viewer()if S.viewer~=viewer then return end;S.viewer=nil;if viewer.resize_autocmd then pcall(vim.api.nvim_del_autocmd,viewer.resize_autocmd)end;if viewer.win and vim.api.nvim_win_is_valid(viewer.win)then pcall(vim.api.nvim_win_close,viewer.win,true)end;if viewer.return_win and vim.api.nvim_win_is_valid(viewer.return_win)then pcall(vim.api.nvim_set_current_win,viewer.return_win)end end
   local function format_viewer()
     local current=table.concat(vim.api.nvim_buf_get_lines(viewer.buf,0,-1,false),"\n");local formatted,err=format_value(filetype,current)
@@ -1709,7 +1859,7 @@ end
 function M.launch()
   pcall(function() require("views.lazydiff").setup_standalone_ui() end)
   setup_highlights();vim.api.nvim_create_autocmd("ColorScheme",{callback=setup_highlights})
-  vim.o.termguicolors=true;vim.o.laststatus=2;vim.o.showtabline=0
+  vim.o.termguicolors=true;vim.o.showtabline=0;ui.setup_dashboard()
   S.group=vim.api.nvim_create_augroup("LazyData",{clear=true})
   local function command(name,fn,desc)
     local cmd=name:sub(1,1):upper()..name:sub(2)
@@ -1725,6 +1875,7 @@ function M.launch()
   command("test",function()if S.form then test_form(S.form)end end,"Test the LazyData connection form")
   S.main.buf=make_buf("connections",false);S.sidebar.buf=make_buf("tables",false);S.result.buf=make_buf("results",false)
   configure(S.main.buf);configure(S.sidebar.buf);configure(S.result.buf)
+  for _,buf in ipairs({S.main.buf,S.sidebar.buf})do ui.attach_select_bar(buf)end
   vim.api.nvim_create_autocmd("VimResized",{group=S.group,callback=function()vim.schedule(function()M.apply_layout(true)end)end})
   vim.api.nvim_create_autocmd("VimLeavePre",{group=S.group,once=true,callback=function()write_session();if S.job and S.job>0 then vim.fn.jobstop(S.job)end end})
   S.open_name=vim.env.LAZYDATA_OPEN~="" and vim.env.LAZYDATA_OPEN or nil

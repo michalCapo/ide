@@ -134,6 +134,7 @@ build: $(NVIM_ARCHIVE) $(MICROMAMBA_BINARY)
 	cp "$(MICROMAMBA_BINARY)" "$$NVIMA_MK/config/micromamba"
 	cp "$(NVIM_SOURCE_DIR)/lua/views/references.lua" "$$NVIMA_MK/config/lua/views/references.lua"
 	cp "$(NVIM_SOURCE_DIR)/lua/views/search.lua" "$$NVIMA_MK/config/lua/views/search.lua"
+	cp "$(NVIM_SOURCE_DIR)/lua/views/ui.lua" "$$NVIMA_MK/config/lua/views/ui.lua"
 	cp -R "$(NVIM_SOURCE_DIR)/vscode-theme" "$$NVIMA_MK/config/vscode-theme"
 	NVIMA_CONFIG_HASH=$$(cd "$$NVIMA_MK/config" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
 	NVIMA_PAYLOAD_ID=$$(printf '%s\n' '$(NVIM_VERSION)-$(ARCH)' "$$NVIM_HASH" "$$NVIMA_CONFIG_HASH" | sha256sum | cut -c1-16)

@@ -1,4 +1,5 @@
 local git = require("views.git")
+local ui = require("views.ui")
 local M = {}
 
 local S = { root = nil, tab = nil, panels = {}, order = { "files", "locals", "remotes", "stashes", "commits", "commit_files" },
@@ -15,25 +16,29 @@ local message_ns = vim.api.nvim_create_namespace("lazyrepo_message")
 local prompt_ns = vim.api.nvim_create_namespace("lazyrepo_prompt")
 
 local function setup_highlights()
+  ui.setup_highlights()
   local hl = vim.api.nvim_set_hl
-  hl(0, "LazyrepoStaged", { link = "Added" })
-  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-  hl(0, "LazyrepoUnstaged", { fg = vim.o.background == "light" and 0x000000 or normal.fg })
-  hl(0, "LazyrepoMixed", { link = "DiagnosticWarn" })
-  hl(0, "LazyrepoConflict", { link = "DiagnosticError" })
-  hl(0, "LazyrepoFolder", { link = "Directory" })
-  hl(0, "LazyrepoHash", { link = "Constant" })
-  hl(0, "LazyrepoAuthor", { link = "Identifier" })
-  hl(0, "LazyrepoDate", { link = "Special" })
-  hl(0, "LazyrepoAhead", { link = "Added" })
-  hl(0, "LazyrepoBehind", { link = "DiagnosticWarn" })
-  hl(0, "LazyrepoMuted", { link = "Comment" })
-  local added = vim.api.nvim_get_hl(0, { name = "Added", link = false })
-  local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
-  hl(0, "LazyrepoCurrent", { fg = added.fg, bold = true })
-  hl(0, "LazyrepoTitle", { fg = comment.fg })
-  hl(0, "LazyrepoTitleActive", { fg = added.fg, bold = true })
-  hl(0, "LazyrepoSelected", { link = "Visual" })
+  hl(0, "LazyrepoStaged", { link = "UiAdded" })
+  hl(0, "LazyrepoStagedMark", { link = "UiAddedBold" })
+  hl(0, "LazyrepoUnstaged", { link = "UiStrong" })
+  hl(0, "LazyrepoUnstagedMark", { link = "UiChangedBold" })
+  hl(0, "LazyrepoMixed", { link = "UiChanged" })
+  hl(0, "LazyrepoUntracked", { link = "UiUntracked" })
+  hl(0, "LazyrepoConflict", { link = "UiError" })
+  hl(0, "LazyrepoFolder", { link = "UiStrong" })
+  hl(0, "LazyrepoTreeMarker", { link = "UiDim" })
+  hl(0, "LazyrepoHash", { link = "UiAccent" })
+  hl(0, "LazyrepoAuthor", { link = "UiAccent" })
+  hl(0, "LazyrepoDate", { link = "UiMuted" })
+  hl(0, "LazyrepoAhead", { link = "UiAdded" })
+  hl(0, "LazyrepoBehind", { link = "UiChanged" })
+  hl(0, "LazyrepoMuted", { link = "UiMuted" })
+  hl(0, "LazyrepoDim", { link = "UiDim" })
+  hl(0, "LazyrepoPlaceholder", { link = "UiNull" })
+  hl(0, "LazyrepoCurrent", { link = "UiAddedBold" })
+  hl(0, "LazyrepoTitle", { link = "UiMuted" })
+  hl(0, "LazyrepoTitleActive", { link = "UiAccent" })
+  hl(0, "LazyrepoSelected", { link = "UiSelect" })
 end
 
 local close_message
@@ -71,10 +76,10 @@ local function message_config(dialog)
     relative = "editor",
     style = "minimal",
     border = "rounded",
-    title = dialog.title,
-    title_pos = "center",
-    footer = " Enter/Esc/q close ",
-    footer_pos = "center",
+    title = ui.float_title(dialog.title, dialog.title_group),
+    title_pos = "left",
+    footer = ui.float_footer({ { "Enter/Esc/q", "close" } }),
+    footer_pos = "right",
     width = width,
     height = height,
     row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - height - 2) / 2)),
@@ -115,6 +120,8 @@ local function notify(message, level, preformatted, custom_title)
     preformatted = preformatted == true,
     title = custom_title or (level >= vim.log.levels.ERROR and " Lazyrepo error "
       or level >= vim.log.levels.WARN and " Lazyrepo warning " or " Lazyrepo "),
+    title_group = level >= vim.log.levels.ERROR and "UiFloatError"
+      or level >= vim.log.levels.WARN and "UiFloatWarn" or nil,
     return_win = vim.api.nvim_get_current_win(),
     buf = vim.api.nvim_create_buf(false, true),
   }
@@ -132,7 +139,7 @@ local function notify(message, level, preformatted, custom_title)
   vim.wo[dialog.win].signcolumn = "no"
   vim.wo[dialog.win].wrap = true
   vim.wo[dialog.win].linebreak = true
-  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  vim.wo[dialog.win].winhighlight = ui.float_highlight
   local opts = { buffer = dialog.buf, silent = true, nowait = true }
   for _, key in ipairs({ "<CR>", "<Esc>", "q" }) do
     vim.keymap.set("n", key, function() close_message(dialog) end, opts)
@@ -165,43 +172,59 @@ end
 
 -- Returns the rendered line plus highlight spans: { group, start_col, end_col } (byte offsets, -1 = eol).
 local function line_for(name, item)
-  if item.placeholder then return "  " .. item.placeholder, { { "LazyrepoMuted", 0, -1 } } end
+  if item.placeholder then return "  " .. item.placeholder, { { "LazyrepoPlaceholder", 0, -1 } } end
   if item.kind then
     local indent = string.rep("  ", item.depth or 0)
     if item.kind == "folder" then
       local group = item.conflict and "LazyrepoConflict"
-        or item.staged and item.unstaged and "LazyrepoMixed"
+        or item.unstaged and "LazyrepoMixed"
         or item.staged and "LazyrepoStaged"
-        or item.unstaged and "LazyrepoUnstaged"
         or "LazyrepoFolder"
-      return indent .. (S.collapsed[item.path] and "▸ " or "▾ ") .. item.name, { { group, #indent, -1 } }
+      local marker = S.collapsed[item.path] and "▸ " or "▾ "
+      return indent .. marker .. item.name,
+        { { "LazyrepoTreeMarker", #indent, #indent + #marker }, { group, #indent + #marker, -1 } }
     end
+    -- The first status letter belongs to the index (green), the second to the work tree (yellow).
     local status = item.status or "  "
-    local group = item.conflict and "LazyrepoConflict"
-      or status == "??" and "LazyrepoUnstaged"
-      or item.staged and item.unstaged and "LazyrepoMixed"
-      or (item.staged and not item.unstaged or item.staged == nil) and "LazyrepoStaged"
-      or "LazyrepoUnstaged"
-    return indent .. status .. " " .. (item.path:match("[^/]+$") or item.path), { { group, #indent, -1 } }
+    local start = #indent
+    local name_start = start + #status + 1
+    local line = indent .. status .. " " .. (item.path:match("[^/]+$") or item.path)
+    if item.conflict then return line, { { "LazyrepoConflict", start, -1 } } end
+    if status == "??" then return line, { { "LazyrepoUntracked", start, -1 } } end
+    local spans = {}
+    if item.staged == nil then
+      local letter = vim.trim(status):sub(1, 1)
+      local group = letter == "A" and "LazyrepoStagedMark" or letter == "D" and "LazyrepoConflict" or "LazyrepoUnstagedMark"
+      spans[#spans + 1] = { group, start, start + #status }
+      spans[#spans + 1] = { "LazyrepoUnstaged", name_start, -1 }
+      return line, spans
+    end
+    if status:sub(1, 1) ~= " " then spans[#spans + 1] = { "LazyrepoStagedMark", start, start + 1 } end
+    if status:sub(2, 2) ~= " " then spans[#spans + 1] = { "LazyrepoUnstagedMark", start + 1, start + 2 } end
+    spans[#spans + 1] = { item.unstaged and "LazyrepoUnstaged" or "LazyrepoStaged", name_start, -1 }
+    return line, spans
   elseif name == "commits" then
     local initials = item.initials or "?"
     return string.format("%s  %s  %s", initials, item.date, item.subject),
       { { "LazyrepoAuthor", 0, #initials }, { "LazyrepoDate", #initials + 2, #initials + 2 + #item.date } }
   elseif name == "locals" then
-    local head = (item.current and "* " or "  ") .. item.name
-    local line = head
+    local marker = item.current and "● " or "  "
+    local line = marker .. item.name
     local spans = {}
-    if item.current then spans[#spans + 1] = { "LazyrepoCurrent", 0, #head } end
+    if item.current then spans[#spans + 1] = { "LazyrepoCurrent", 0, #line } end
     if item.upstream ~= "" then
+      local arrow_start = #line
+      line = line .. "  → "
+      spans[#spans + 1] = { "LazyrepoDim", arrow_start, #line }
       local upstream_start = #line
-      line = line .. " → " .. item.upstream
+      line = line .. item.upstream
       spans[#spans + 1] = { "LazyrepoMuted", upstream_start, #line }
       local ahead_start = #line
       line = line .. string.format("  ↑%d", item.ahead or 0)
-      spans[#spans + 1] = { "LazyrepoAhead", ahead_start, #line }
+      spans[#spans + 1] = { (item.ahead or 0) > 0 and "LazyrepoAhead" or "LazyrepoDim", ahead_start, #line }
       local behind_start = #line
       line = line .. string.format(" ↓%d", item.behind or 0)
-      spans[#spans + 1] = { "LazyrepoBehind", behind_start, #line }
+      spans[#spans + 1] = { (item.behind or 0) > 0 and "LazyrepoBehind" or "LazyrepoDim", behind_start, #line }
     end
     return line, spans
   elseif name == "remotes" then return "  " .. item.name, {}
@@ -209,23 +232,60 @@ local function line_for(name, item)
   return string.format("%s %s", item.ref, item.subject), { { "LazyrepoHash", 0, #item.ref } }
 end
 
+local PANEL_KEYS = {
+  files = { { "Space", "stage" }, { "a", "all" }, { "c", "commit" }, { "d", "discard" }, { "?", "help" } },
+  locals = { { "Space", "checkout" }, { "M", "merge" }, { "r", "rebase" }, { "d", "delete" }, { "?", "help" } },
+  remotes = { { "Space", "checkout" }, { "Enter", "commits" }, { "S", "sync" }, { "?", "help" } },
+  stashes = { { "Space", "apply" }, { "gp", "pop" }, { "d", "drop" }, { "?", "help" } },
+  commits = { { "Enter", "files" }, { "Esc", "back" }, { "?", "help" } },
+  commit_files = { { "Enter", "diff" }, { "Esc", "back" }, { "?", "help" } },
+}
+
+function M._statusline()
+  local segments = {}
+  for _, item in ipairs((panel("locals") or {}).items or {}) do
+    if item.current then
+      local ahead, behind = item.ahead or 0, item.behind or 0
+      segments = {
+        { "  ⎇ ", "UiStatusAccent" }, { item.name .. " ", "UiStatusStrong" },
+        { "↑" .. ahead, ahead > 0 and "UiStatusAdded" or "UiStatusDim" }, { " ", "UiStatus" },
+        { "↓" .. behind, behind > 0 and "UiStatusChanged" or "UiStatusDim" },
+      }
+      break
+    end
+  end
+  if S.busy then segments[#segments + 1] = { "   working…", "UiStatusAccent" } end
+  if S.root then segments[#segments + 1] = { "   " .. vim.fn.fnamemodify(S.root, ":~") .. " ", "UiStatusMuted", true } end
+  return ui.status("VIMG", segments, PANEL_KEYS[S.order[S.active]])
+end
+
+local function panel_details(name, p)
+  if not p.items or #p.items == 0 or (p.items[1] or {}).placeholder then return "" end
+  local position = string.format("%d of %d", p.index or 1, #p.items)
+  if name ~= "files" then return position end
+  local changes = 0
+  for _, item in ipairs(p.items) do
+    if item.kind == "file" then changes = changes + 1 end
+  end
+  return string.format("%d %s   %s", changes, changes == 1 and "change" or "changes", position)
+end
+
 local function decorate()
   for _, name in ipairs(S.order) do
     local p = panel(name)
     if p and vim.api.nvim_buf_is_valid(p.buf) then
       local active = S.order[S.active] == name
-      local title_hl = active and "LazyrepoTitleActive" or "LazyrepoTitle"
-      local count = p.items and #p.items > 0 and not (p.items[1] or {}).placeholder
-        and string.format("%d of %d ", p.index or 1, #p.items) or ""
-      local bar = " " .. p.title:gsub("%%", "%%%%") .. (S.busy and "  [working…]" or "") .. " %=" .. count
+      local bar = ui.header(p.title, active, panel_details(name, p))
       for _, win in ipairs(vim.fn.win_findbuf(p.buf)) do
         if vim.api.nvim_win_is_valid(win) then
           vim.wo[win].winbar = bar
-          vim.wo[win].winhighlight = "WinBar:" .. title_hl .. ",WinBarNC:" .. title_hl
+          ui.panel_window(win, active)
         end
       end
+      ui.update_select_bar(p.buf)
     end
   end
+  vim.go.statusline = M._statusline()
 end
 
 local function render(name)
@@ -472,10 +532,10 @@ local function confirm_config(prompt)
     relative = "editor",
     style = "minimal",
     border = "rounded",
-    title = " Confirm ",
-    title_pos = "center",
-    footer = " y yes · n no · Esc cancel ",
-    footer_pos = "center",
+    title = ui.float_title("Confirm"),
+    title_pos = "left",
+    footer = ui.float_footer({ { "y", "yes" }, { "n", "no" }, { "Esc", "cancel" } }, true),
+    footer_pos = "right",
     width = width,
     height = height,
     row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - height - 2) / 2)),
@@ -527,7 +587,7 @@ local function confirm(prompt, callback)
   vim.wo[dialog.win].relativenumber = false
   vim.wo[dialog.win].signcolumn = "no"
   vim.wo[dialog.win].wrap = false
-  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  vim.wo[dialog.win].winhighlight = ui.float_highlight
   local opts = { buffer = dialog.buf, silent = true, nowait = true }
   vim.keymap.set("n", "y", function() close_confirm(dialog, true) end, opts)
   vim.keymap.set("n", "Y", function() close_confirm(dialog, true) end, opts)
@@ -550,10 +610,10 @@ local function prompt_frame_config(title, width, height, footer)
     relative = "editor",
     style = "minimal",
     border = "rounded",
-    title = " " .. title .. " ",
-    title_pos = "center",
-    footer = footer,
-    footer_pos = "center",
+    title = ui.float_title(title),
+    title_pos = "left",
+    footer = ui.float_footer(footer, true),
+    footer_pos = "right",
     width = width,
     height = height,
     row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - height - 2) / 2)),
@@ -582,7 +642,7 @@ local function choice_config(dialog)
   for _, item in ipairs(dialog.items) do width = math.max(width, vim.fn.strdisplaywidth(tostring(item)) + 4) end
   width = math.min(width, 72)
   return prompt_frame_config(dialog.title, width, #dialog.items + 2,
-    " j/k move · Enter select · Esc cancel ")
+    { { "Enter", "select" }, { "j/k", "move" }, { "Esc", "cancel" } })
 end
 
 local function render_choice(dialog)
@@ -625,7 +685,7 @@ local function select_dialog(items, opts, callback)
   vim.wo[dialog.win].relativenumber = false
   vim.wo[dialog.win].signcolumn = "no"
   vim.wo[dialog.win].wrap = false
-  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  vim.wo[dialog.win].winhighlight = ui.float_highlight
   local function move_choice(delta)
     dialog.index = (dialog.index - 1 + delta) % #dialog.items + 1
     render_choice(dialog)
@@ -660,7 +720,7 @@ local function input_config(dialog)
     local value = vim.api.nvim_buf_get_lines(dialog.buf, 0, 1, false)[1] or ""
     width = math.max(width, vim.fn.strdisplaywidth(value) + 4)
   end
-  return prompt_frame_config(dialog.title, math.min(width, 72), 1, " Enter apply · Esc cancel ")
+  return prompt_frame_config(dialog.title, math.min(width, 72), 1, { { "Enter", "apply" }, { "Esc", "cancel" } })
 end
 
 local function input_dialog(opts, callback)
@@ -684,7 +744,7 @@ local function input_dialog(opts, callback)
   vim.wo[dialog.win].relativenumber = false
   vim.wo[dialog.win].signcolumn = "no"
   vim.wo[dialog.win].wrap = false
-  vim.wo[dialog.win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle,FloatFooter:FloatFooter"
+  vim.wo[dialog.win].winhighlight = ui.float_highlight
   vim.api.nvim_win_set_cursor(dialog.win, { 1, #default })
   local function submit()
     local value = vim.api.nvim_buf_get_lines(dialog.buf, 0, 1, false)[1] or ""
@@ -831,10 +891,10 @@ local function commit()
     height = height,
     style = "minimal",
     border = "rounded",
-    title = " Commit message ",
-    title_pos = "center",
-    footer = " Enter: commit  Ctrl-j: newline  Up/Down: history  Esc: cancel ",
-    footer_pos = "center",
+    title = ui.float_title("Commit message"),
+    title_pos = "left",
+    footer = ui.float_footer({ { "Enter", "commit" }, { "Ctrl-j", "newline" }, { "Up/Down", "history" }, { "Esc", "cancel" } }, true),
+    footer_pos = "right",
   })
   S.commit_prompt_buf, S.commit_prompt_win = buf, win
   S.commit_history_index, S.commit_prompt_draft = 0, ""
@@ -846,6 +906,7 @@ local function commit()
   vim.wo[win].wrap = true
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
+  vim.wo[win].winhighlight = ui.float_highlight
   set_prompt_message(buf, "")
 
   local function submit()
@@ -1156,11 +1217,11 @@ local function help()
   local dialog = notify(table.concat(lines, "\n"), vim.log.levels.INFO, true, " Lazyrepo keymap ")
   for _, row in ipairs(headings) do
     vim.api.nvim_buf_set_extmark(dialog.buf, message_ns, row, 2,
-      { end_col = 2 + #lines[row], hl_group = "LazyrepoTitleActive" })
+      { end_col = 2 + #lines[row], hl_group = "UiFloatTitle" })
   end
   for _, shortcut in ipairs(shortcuts) do
     vim.api.nvim_buf_set_extmark(dialog.buf, message_ns, shortcut.row, 4,
-      { end_col = 4 + shortcut.length, hl_group = "LazyrepoAhead" })
+      { end_col = 4 + shortcut.length, hl_group = "UiAccent" })
   end
 end
 
@@ -1229,6 +1290,7 @@ local function create_panel(name, title, win)
     vim.wo[win].number = false; vim.wo[win].cursorline = true; vim.wo[win].wrap = false
   end
   S.panels[name] = { title = title, win = win, buf = buf, items = {}, index = 1 }; configure(buf)
+  ui.attach_select_bar(buf)
 end
 
 local function keep_only_current_window()
@@ -1322,7 +1384,8 @@ function M.launch()
   pcall(function() require("views.lazydiff").setup_standalone_ui() end)
   setup_highlights()
   vim.api.nvim_create_autocmd("ColorScheme", { callback = setup_highlights })
-  vim.o.termguicolors = true; vim.o.laststatus = 2; vim.o.showtabline = 0
+  vim.o.termguicolors = true; vim.o.showtabline = 0
+  ui.setup_dashboard()
   keep_only_current_window(); local left = vim.api.nvim_get_current_win()
   vim.cmd("rightbelow vsplit"); local branches = vim.api.nvim_get_current_win()
   vim.cmd("rightbelow split"); local remotes = vim.api.nvim_get_current_win()

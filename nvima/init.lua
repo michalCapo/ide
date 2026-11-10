@@ -20,6 +20,7 @@ for _, root in ipairs({ config_dir, config_dir .. "/lua" }) do
   end
 end
 local references_view = require("views.references")
+local ui = require("views.ui")
 
 local function reread_all_buffers_and_restart_lsp()
   local current_buf = vim.api.nvim_get_current_buf()
@@ -605,11 +606,10 @@ function _G.nvim_render_buffer_tab(buf, active)
   local tab_hl = active and "%#BufferTabActive#" or "%#BufferTabInactive#"
   local label = " " .. buffer_tab_name(buf)
 
-  if vim.bo[buf].modified then
-    label = label .. " ●"
-  end
-
   local tab = string.format("%%%d@v:lua.open_buffer_tab@%s%s", buf, tab_hl, tabline_escape(label))
+  if vim.bo[buf].modified then
+    tab = tab .. (active and "%#BufferTabModifiedActive#" or "%#BufferTabModifiedInactive#") .. " ●"
+  end
   local errors = buffer_error_count(buf)
   if errors > 0 then
     local error_hl = active and "%#BufferTabErrorActive#" or "%#BufferTabErrorInactive#"
@@ -700,6 +700,96 @@ end
 
 vim.o.showtabline = 2
 vim.o.tabline = "%!v:lua.nvim_buffer_tabline()"
+
+-- Status line: mode label, branch, file, diagnostics, language server and position.
+local status_branches = {}
+
+local function status_branch(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  local dir = name ~= "" and vim.fs.dirname(name) or vim.uv.cwd()
+  if status_branches[dir] ~= nil then
+    return status_branches[dir]
+  end
+  local branch = ""
+  local git = vim.fs.find(".git", { path = dir, upward = true })[1]
+  if git then
+    local head_path = git .. "/HEAD"
+    if vim.fn.isdirectory(git) == 0 then
+      local gitdir = ((vim.fn.readfile(git, "", 1) or {})[1] or ""):match("^gitdir:%s*(.-)%s*$")
+      if gitdir then
+        if not gitdir:match("^/") then
+          gitdir = vim.fs.dirname(git) .. "/" .. gitdir
+        end
+        head_path = gitdir .. "/HEAD"
+      end
+    end
+    local head = vim.fn.filereadable(head_path) == 1 and (vim.fn.readfile(head_path, "", 1)[1] or "") or ""
+    branch = head:match("^ref: refs/heads/(.+)$") or head:sub(1, 7)
+  end
+  status_branches[dir] = branch
+  return branch
+end
+
+local status_modes = {
+  n = { "NORMAL", "UiMode" }, i = { "INSERT", "UiModeInsert" }, v = { "VISUAL", "UiModeVisual" },
+  V = { "V-LINE", "UiModeVisual" }, ["\22"] = { "V-BLOCK", "UiModeVisual" }, R = { "REPLACE", "UiReadOnly" },
+  c = { "COMMAND", "UiMode" }, t = { "TERMINAL", "UiModeInsert" }, s = { "SELECT", "UiModeVisual" },
+}
+
+function _G.nvim_statusline()
+  local win = vim.g.statusline_winid or vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_win_get_buf(win)
+  local name = vim.api.nvim_buf_get_name(buf)
+  local path = name ~= "" and vim.fn.fnamemodify(name, ":~:.") or "[No Name]"
+  local dir, file = path:match("^(.*/)([^/]+)$")
+  dir, file = dir or "", file or path
+  local modified = vim.bo[buf].modified and "%#UiStatusChanged# ●" or ""
+  if win ~= vim.api.nvim_get_current_win() then
+    return "%#UiStatusDim#  " .. ui.escape(dir) .. "%#UiStatusMuted#" .. ui.escape(file) .. modified .. "%#UiStatus#"
+  end
+
+  local mode = status_modes[vim.api.nvim_get_mode().mode:sub(1, 1)] or status_modes.n
+  local parts = { "%#" .. mode[2] .. "# " .. mode[1] .. " " }
+  local branch = status_branch(buf)
+  if branch ~= "" then
+    table.insert(parts, "%#UiStatusAccent#  ⎇ %#UiStatus#" .. ui.escape(branch))
+  end
+  table.insert(parts, "%<%#UiStatusMuted#   " .. ui.escape(dir) .. "%#UiStatusStrong#" .. ui.escape(file) .. modified)
+  local counts = vim.diagnostic.count(buf)
+  local errors = counts[vim.diagnostic.severity.ERROR] or 0
+  local warnings = counts[vim.diagnostic.severity.WARN] or 0
+  table.insert(parts, (errors > 0 and "%#UiStatusError#" or "%#UiStatusDim#") .. "   ✕ " .. errors)
+  table.insert(parts, (warnings > 0 and "%#UiStatusWarn#" or "%#UiStatusDim#") .. "  ▲ " .. warnings)
+
+  local right = {}
+  local client = vim.lsp.get_clients({ bufnr = buf })[1]
+  if client then
+    table.insert(right, ui.escape(client.name))
+  end
+  if vim.bo[buf].filetype ~= "" then
+    table.insert(right, vim.bo[buf].filetype)
+  end
+  table.insert(parts, "%#UiStatusMuted#%=" .. table.concat(right, "   "))
+  table.insert(parts, "%#UiStatus#   Ln %l, Col %v  %#UiKey# %p%% %#UiStatus#")
+  return table.concat(parts)
+end
+
+vim.o.showmode = false
+vim.o.statusline = "%!v:lua.nvim_statusline()"
+vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained", "DirChanged", "ShellCmdPost", "TermLeave" }, {
+  group = vim.api.nvim_create_augroup("VimeStatusBranch", { clear = true }),
+  callback = function()
+    status_branches = {}
+  end,
+})
+vim.api.nvim_create_autocmd("ModeChanged", {
+  group = vim.api.nvim_create_augroup("VimeStatusMode", { clear = true }),
+  callback = function()
+    if #vim.api.nvim_list_uis() > 0 then
+      vim.cmd.redrawstatus()
+    end
+  end,
+})
 
 vim.api.nvim_create_autocmd({ "BufAdd", "BufEnter", "BufFilePost", "TermOpen" }, {
   group = vim.api.nvim_create_augroup("HiddenBufferTabs", { clear = true }),
@@ -1272,11 +1362,14 @@ local function apply_picker_highlights()
   vim.api.nvim_set_hl(0, "NvimLandingVersion", { link = "Comment" })
   vim.api.nvim_set_hl(0, "FunctionContextWinbar", { link = "WinBar" })
   vim.api.nvim_set_hl(0, "FunctionContextWinbarLine", { link = "LineNr" })
-  vim.api.nvim_set_hl(0, "BufferTabActive", { link = "TabLineSel" })
-  vim.api.nvim_set_hl(0, "BufferTabInactive", { link = "TabLine" })
-  paint_foreground_on_background("BufferTabErrorActive", "DiagnosticError", "TabLineSel")
-  paint_foreground_on_background("BufferTabErrorInactive", "DiagnosticError", "TabLine")
-  vim.api.nvim_set_hl(0, "BufferTabFill", { link = "TabLineFill" })
+  ui.setup_highlights()
+  vim.api.nvim_set_hl(0, "BufferTabActive", { link = "UiTabActive" })
+  vim.api.nvim_set_hl(0, "BufferTabInactive", { link = "UiTab" })
+  paint_foreground_on_background("BufferTabErrorActive", "DiagnosticError", "UiTabActive")
+  paint_foreground_on_background("BufferTabErrorInactive", "DiagnosticError", "UiTab")
+  paint_foreground_on_background("BufferTabModifiedActive", "UiChanged", "UiTabActive")
+  paint_foreground_on_background("BufferTabModifiedInactive", "UiChanged", "UiTab")
+  vim.api.nvim_set_hl(0, "BufferTabFill", { link = "UiTabFill" })
   vim.api.nvim_set_hl(0, "DiagnosticFloatingError", { link = "DiagnosticError" })
   vim.api.nvim_set_hl(0, "DiagnosticFloatingWarn", { link = "DiagnosticWarn" })
   vim.api.nvim_set_hl(0, "DiagnosticFloatingInfo", { link = "DiagnosticInfo" })
@@ -1293,6 +1386,12 @@ local function apply_os_background()
 end
 
 apply_os_background()
+
+-- A manual :colorscheme clears every group; restore the shared tab and status line colours.
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("VimeUiHighlights", { clear = true }),
+  callback = apply_picker_highlights,
+})
 
 local function reserve_code_signcolumn(win)
   win = win or vim.api.nvim_get_current_win()

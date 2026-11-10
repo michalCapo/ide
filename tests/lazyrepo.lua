@@ -56,8 +56,13 @@ lazyrepo._confirm("Ignore and untrack a/very/long/path/to/a/generated/file.db?",
 local dialog = lazyrepo._state.confirm_dialog
 assert(dialog and vim.api.nvim_win_is_valid(dialog.win))
 local config = vim.api.nvim_win_get_config(dialog.win)
+local function footer_text(window_config)
+  local parts = {}
+  for _, chunk in ipairs(window_config.footer or {}) do parts[#parts + 1] = chunk[1] end
+  return (table.concat(parts):gsub("%s+", " "))
+end
 assert(config.relative == "editor" and config.title[1][1] == " Confirm ")
-assert(config.footer[1][1]:find("y yes", 1, true) and config.footer[1][1]:find("n no", 1, true))
+assert(footer_text(config):find("y yes", 1, true) and footer_text(config):find("n no", 1, true))
 vim.cmd("normal n")
 assert(lazyrepo._state.confirm_dialog == nil and not accepted)
 
@@ -69,7 +74,7 @@ local message = lazyrepo._notify("A centered message")
 assert(message and vim.api.nvim_win_is_valid(message.win))
 config = vim.api.nvim_win_get_config(message.win)
 assert(config.relative == "editor" and config.title[1][1] == " Lazyrepo ")
-assert(config.footer[1][1]:find("Enter/Esc/q close", 1, true))
+assert(footer_text(config):find("Enter/Esc/q close", 1, true))
 assert(config.row >= 0 and config.col >= 0)
 vim.cmd("normal q")
 assert(lazyrepo._state.message_dialog == nil)
