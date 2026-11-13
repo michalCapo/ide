@@ -420,16 +420,83 @@ local function fetch_all(callback)
   end, { env = { GIT_TERMINAL_PROMPT = "0", GIT_SSH_COMMAND = "ssh -o BatchMode=yes" } })
 end
 
+-- Sync fetches every remote, then brings each tracking branch level with its
+-- upstream: branches only behind are fast-forwarded, branches only ahead are
+-- pushed. Diverged branches and failed steps are reported, not resolved.
+-- Steps are planned again after each round, so a branch tracking another local
+-- branch follows it once that branch has moved.
+local function sync_plan(attempted)
+  local format = "%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream:track,nobracket)%00%(HEAD)"
+  local out, err = git.git(S.root, { "for-each-ref", "--format=" .. format, "refs/heads" })
+  if not out then return nil, nil, err end
+  local steps, skipped = {}, {}
+  for line in out:gmatch("[^\n]+") do
+    local ref, upstream, remote, merge, track, head = line:match("^(.-)%z(.-)%z(.-)%z(.-)%z(.-)%z(.-)$")
+    local name = ref and ref:gsub("^refs/heads/", "")
+    local ahead, behind = tonumber(track and track:match("ahead (%d+)")) or 0, tonumber(track and track:match("behind (%d+)")) or 0
+    local args
+    if not ref or upstream == "" then
+      -- Not a tracking branch.
+    elseif track == "gone" then
+      skipped[#skipped + 1] = name .. ": upstream " .. upstream:gsub("^refs/remotes/", "") .. " no longer exists"
+    elseif ahead > 0 and behind > 0 then
+      skipped[#skipped + 1] = name .. ": ↑" .. ahead .. " ↓" .. behind .. " (merge or rebase it first)"
+    elseif behind > 0 and head == "*" then
+      args = { "merge", "--ff-only", "--quiet", upstream }
+    elseif behind > 0 then
+      -- Fetching into the branch fast-forwards it and refuses a branch checked out in another worktree.
+      args = { "fetch", "--quiet", ".", upstream .. ":" .. ref }
+    elseif ahead > 0 and remote == "." then
+      skipped[#skipped + 1] = name .. ": ↑" .. ahead .. " ahead of local branch " .. upstream:gsub("^refs/heads/", "")
+    elseif ahead > 0 then
+      args = { "push", "--quiet", remote, ref .. ":" .. merge }
+    end
+    if args then
+      local key = table.concat(args, " ")
+      if not attempted[key] then
+        attempted[key] = true
+        steps[#steps + 1] = { name = name, args = args }
+      end
+    end
+  end
+  return steps, skipped
+end
+
 local function sync_branches()
   if S.busy then return end
   S.busy = true
   ui.progress("Syncing branches…")
   decorate()
-  fetch_all(function(ok, err)
+  local attempted, failed = {}, {}
+  local function finish(problems)
     S.busy = false
     ui.progress(nil)
-    if not ok then notify_error("Sync failed:\n" .. err); decorate(); return end
+    if not S.root then return end
     M.refresh()
+    S.watch_pending = false
+    vim.list_extend(problems, failed)
+    if #problems > 0 then notify_error("Some branches were not synced:\n" .. table.concat(problems, "\n")) end
+  end
+  local function round()
+    if not S.root then finish({}); return end
+    local steps, skipped, err = sync_plan(attempted)
+    if not steps then finish({ err }); return end
+    if #steps == 0 then finish(skipped); return end
+    local index = 0
+    local function next_step()
+      index = index + 1
+      local step = steps[index]
+      if not step or not S.root then round(); return end
+      git.git_async(S.root, step.args, function(ok, _, step_err)
+        if not ok then failed[#failed + 1] = step.name .. ": " .. step_err end
+        next_step()
+      end, { env = { GIT_TERMINAL_PROMPT = "0", GIT_SSH_COMMAND = "ssh -o BatchMode=yes" } })
+    end
+    next_step()
+  end
+  fetch_all(function(ok, err)
+    if not ok then finish({ "fetch: " .. err }); return end
+    round()
   end)
 end
 
@@ -1214,7 +1281,7 @@ local function help()
     { "Space", "apply" }, { "gp", "pop" }, { "d", "drop" },
   })
   group("Repository", {
-    { "c", "commit" }, { "s", "stash" }, { "p/P", "pull/push" }, { "S", "sync remote branches" }, { "R", "refresh" },
+    { "c", "commit" }, { "s", "stash" }, { "p/P", "pull/push" }, { "S", "sync branches (fetch, pull, push)" }, { "R", "refresh" },
     { "]c/]s/]a", "continue/skip/abort conflict" }, { "q", "quit" },
   })
   table.remove(lines)

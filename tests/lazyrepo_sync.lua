@@ -45,13 +45,68 @@ for _, branch in ipairs(lazyrepo._state.panels.locals.items) do
 end
 
 local locals = lazyrepo._state.panels.locals
-vim.api.nvim_set_current_win(lazyrepo._state.panels.files.win)
-vim.api.nvim_feedkeys("S", "x", false)
-assert(vim.wait(5000, function()
-  for _, branch in ipairs(locals.items) do if branch.behind ~= 1 then return false end end
-  return not lazyrepo._state.busy
-end, 20), "sync did not refresh branches")
+local function sync()
+  vim.api.nvim_set_current_win(lazyrepo._state.panels.files.win)
+  vim.api.nvim_feedkeys("S", "x", false)
+  assert(vim.wait(5000, function() return not lazyrepo._state.busy end, 20), "sync did not finish")
+end
+local function counts()
+  local result = {}
+  for _, branch in ipairs(locals.items) do result[branch.name] = { branch.ahead, branch.behind } end
+  return result
+end
+local function rev(dir, ref)
+  return vim.trim(vim.system({ "git", "-C", dir, "rev-parse", ref }, { text = true }):wait().stdout)
+end
+
+-- Behind branches are fast-forwarded: the checked-out one and the other one.
+sync()
+local c = counts()
+assert(c.main[1] == 0 and c.main[2] == 0, "current branch was not fast-forwarded")
+assert(c.other[1] == 0 and c.other[2] == 0, "other branch was not fast-forwarded")
+assert(vim.fn.filereadable(root .. "/remote-main") == 1, "work tree was not updated")
 assert(lazyrepo._state.message_dialog == nil, "successful sync must not show a dialog")
+
+-- Ahead branches are pushed.
+commit(root, "local-main")
+lazyrepo.refresh()
+assert(counts().main[1] == 1, "local commit is not ahead")
+sync()
+assert(counts().main[1] == 0, "ahead branch was not pushed")
+assert(rev(remote, "main") == rev(root, "main"), "remote main was not updated")
+assert(lazyrepo._state.message_dialog == nil, "successful push must not show a dialog")
+
+-- Diverged branches are left alone and reported.
+git(root, "switch", "-q", "other")
+commit(root, "local-other")
+git(peer, "switch", "-q", "other")
+git(peer, "pull", "-q", "--ff-only")
+commit(peer, "remote-other-2")
+git(peer, "push", "-q", "origin", "other")
+local before = rev(root, "other")
+sync()
+assert(rev(root, "other") == before, "diverged branch changed")
+assert(lazyrepo._state.message_dialog ~= nil, "diverged branch was not reported")
+assert(lazyrepo._state.message_dialog.message:find("other: ↑1 ↓1", 1, true), "diverged report is missing the branch")
+
+-- A branch that tracks a local branch follows it after that branch is fast-forwarded,
+-- even when a tag has the same name as the branch.
+git(root, "switch", "-q", "main")
+git(root, "branch", "-q", "--track", "feature", "main")
+git(root, "tag", "feature")
+git(peer, "switch", "-q", "main")
+git(peer, "pull", "-q", "--ff-only")
+commit(peer, "remote-main-2")
+git(peer, "push", "-q", "origin", "main")
+sync()
+assert(rev(root, "refs/heads/main") == rev(remote, "main"), "main was not fast-forwarded")
+assert(rev(root, "refs/heads/feature") == rev(remote, "main"), "feature did not follow local main")
+
+-- A removed upstream is reported.
+git(peer, "push", "-q", "origin", "--delete", "other")
+sync()
+assert(lazyrepo._state.message_dialog.message:find("other: upstream origin/other no longer exists", 1, true),
+  "gone upstream was not reported")
 
 vim.fn.delete(root, "rf")
 vim.fn.delete(remote, "rf")
